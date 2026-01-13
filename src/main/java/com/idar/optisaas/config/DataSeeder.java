@@ -41,6 +41,7 @@ public class DataSeeder implements CommandLineRunner {
 
         User user = new User();
         user.setEmail("admin@opti.com");
+        user.setUsername("admin");
         user.setFullName("Admin Supremo");
         user.setPassword(passwordEncoder.encode("123456"));
         user.setActive(true);

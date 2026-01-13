@@ -4,8 +4,6 @@
 
 **El backend definitivo para la gestión óptica moderna.**
 
-> _"Vender lentes es fácil. Gestionar inventario concurrente sin vender aire... eso es ingeniería."_
-
 **Optisaas Core** no es otro CRUD genérico. Es un sistema de gestión empresarial diseñado con **arquitectura Multi-tenant lógica**, seguridad de grado bancario con autenticación en dos fases y un motor transaccional blindado contra condiciones de carrera.
 
 Diseñado para escalar desde una sola tienda hasta franquicias masivas, garantizando que los datos de una sucursal sean matemáticamente invisibles para otra y que el inventario sea sagrado, incluso durante un ataque de ventas simultáneas.
@@ -17,6 +15,7 @@ Diseñado para escalar desde una sola tienda hasta franquicias masivas, garantiz
 - [Configuración](#configuración)
 - [Uso (Endpoints API)](#uso-endpoints-api)
   - [Módulo Auth](#módulo-auth)
+  - [Módulo Usuarios (Gestión)](#módulo-usuarios-gestión)
   - [Módulo Ventas (Transactional)](#módulo-ventas-transactional)
   - [Módulo Clínico](#módulo-clínico)
 - [Arquitectura & Resiliencia](#arquitectura--resiliencia)
@@ -25,6 +24,7 @@ Diseñado para escalar desde una sola tienda hasta franquicias masivas, garantiz
 
 - **Multi-tenancy Real**: Aislamiento lógico de datos mediante `TenantContext` y Filtros de Hibernate (`@Filter`). Un desarrollador junior no puede filtrar datos de otra sucursal por error, el sistema lo impide a nivel de ORM.
 - **Seguridad en 2 Fases**: Flujo de login único: Credenciales Globales (Pre-Auth) + PIN de Sucursal Local = Token de Acceso Completo. Permite que un mismo optometrista trabaje en múltiples sucursales con permisos distintos.
+- **Login Híbrido & Sin Fricción**: Soporte para autenticación flexible mediante Email o ID de Empleado (Username). Eliminación inteligente de validación de PIN para empleados con roles pre-asignados.
 - **Race Condition Proof**: Implementación de **Pessimistic Locking** (`SELECT ... FOR UPDATE`) en inventarios y saldos. El sistema prefiere encolar a un cliente por 50ms antes que permitir una venta de stock inexistente o un doble pago.
 - **Precios Dinámicos JSONB**: Motor de reglas de precios almacenado en estructuras JSON nativas dentro de SQL, permitiendo configuraciones complejas (Esfera/Cilindro/Material) sin explotar el modelo relacional.
 - **Auditoría Automática**: Inyección automática de `branch_id` y timestamps mediante `EntityListeners` y Aspectos. Cero código repetitivo en los controladores.
@@ -57,11 +57,20 @@ La API es RESTful, predecible y segura por defecto.
 
 ### Módulo Auth
 
-| Método   | Endpoint                  | Descripción                                                   | Body Requerido                           |
-| -------- | ------------------------- | ------------------------------------------------------------- | ---------------------------------------- |
-| **POST** | `/api/auth/login`         | Paso 1: Valida usuario/pass. Retorna Cookie `PRE_AUTH`.       | `{ "email": "...", "password": "..." }`  |
-| **POST** | `/api/auth/select-branch` | Paso 2: Valida PIN. Retorna Cookie `FULL` con Rol real.       | `{ "branchId": 1, "branchPin": "1234" }` |
-| **GET**  | `/api/auth/my-branches`   | Lista sucursales disponibles para el usuario pre-autenticado. | _Cookie Pre-Auth_                        |
+| Método   | Endpoint                  | Descripción                                                                        | Body Requerido                                 |
+| -------- | ------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **POST** | `/api/auth/login`         | Paso 1: Valida usuario/pass (acepta Email o ID). Retorna Cookie `PRE_AUTH`.        | `{ "identifier": "10050", "password": "..." }` |
+| **POST** | `/api/auth/select-branch` | Paso 2: Valida acceso. Retorna Cookie `FULL`. **No requiere PIN si ya tiene Rol.** | `{ "branchId": 1 }`                            |
+| **GET**  | `/api/auth/my-branches`   | Lista sucursales disponibles para el usuario pre-autenticado.                      | _Cookie Pre-Auth_                              |
+
+### Módulo Usuarios (Gestión)
+
+| Método     | Endpoint              | Descripción                                                 | Body / Notas                                                                |
+| ---------- | --------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **POST**   | `/api/users/create`   | Crea empleado y asigna rol/sucursal atómicamente.           | `{ "fullName": "...", "username": "...", "role": "SELLER", "branchId": 1 }` |
+| **PUT**    | `/api/users/{id}`     | Modifica datos o contraseña de un empleado.                 | `{ "fullName": "Nuevo Nombre" }`                                            |
+| **DELETE** | `/api/users/{id}`     | Desactivación lógica (Soft Delete). No borra historial.     | _N/A_                                                                       |
+| **GET**    | `/api/users/by-owner` | Lista empleados de la sucursal activa (Solo Owner/Manager). | _Requiere Token FULL_                                                       |
 
 ### Módulo Ventas (Transactional)
 
@@ -86,6 +95,6 @@ Este proyecto ha sido sometido al protocolo `chaos_test.sh` para garantizar inte
 
 El sistema ha sobrevivido a ráfagas de concurrencia simulando un "Black Friday":
 
-- **Integridad de Inventario:** ✅ Escenario de 20 peticiones concurrentes para 10 items de stock. Resultado: **10 Ventas Exitosas, 10 Rechazos Controlados (400 Bad Request)**. Cero sobreventa.
-- **Integridad Financiera:** ✅ Escenario de 5 intentos de pago simultáneos sobre la misma deuda. Resultado: **1 Pago Aceptado, 4 Rechazados**. Saldo nunca es negativo.
-- **Estabilidad:** ✅ Cero errores `500 Internal Server Error` y cero `StackOverflowError` (gracias Lombok exclusion) durante las pruebas de estrés.
+- **Integridad de Inventario:** Escenario de 20 peticiones concurrentes para 10 items de stock. Resultado: **10 Ventas Exitosas, 10 Rechazos Controlados (400 Bad Request)**. Cero sobreventa.
+- **Integridad Financiera:** Escenario de 5 intentos de pago simultáneos sobre la misma deuda. Resultado: **1 Pago Aceptado, 4 Rechazados**. Saldo nunca es negativo.
+- **Estabilidad:** Cero errores `500 Internal Server Error` y cero `StackOverflowError` (gracias Lombok exclusion) durante las pruebas de estrés.

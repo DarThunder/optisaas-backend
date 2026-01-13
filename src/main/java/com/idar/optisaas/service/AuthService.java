@@ -21,17 +21,22 @@ public class AuthService {
     @Autowired private JwtUtils jwtUtils;
 
     public ResponseCookie login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+        User user = userRepository.findByEmailOrUsername(request.getIdentifier(), request.getIdentifier())
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado (Email o ID inválido)"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new RuntimeException("Credenciales inválidas");
         }
-        return jwtUtils.generatePreAuthCookie(user.getEmail());
+        
+        String principal = (user.getEmail() != null && !user.getEmail().isEmpty()) ? user.getEmail() : user.getUsername();
+        
+        return jwtUtils.generatePreAuthCookie(principal);
     }
 
-    public List<BranchDTO> getUserBranches(String email) {
-        User user = userRepository.findByEmail(email).orElseThrow();
+    public List<BranchDTO> getUserBranches(String identifier) {
+        User user = userRepository.findByEmailOrUsername(identifier, identifier)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado: " + identifier));
+                
         return user.getBranchRoles().stream()
                 .map(role -> {
                     BranchDTO dto = new BranchDTO();
@@ -43,18 +48,14 @@ public class AuthService {
                 .collect(Collectors.toList());
     }
 
-    public AuthResponse selectBranch(String email, BranchSelectRequest request) {
-        User user = userRepository.findByEmail(email).orElseThrow();
-
+    public AuthResponse selectBranch(String identifier, BranchSelectRequest request) {
+        User user = userRepository.findByEmailOrUsername(identifier, identifier)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado: " + identifier));
         UserBranchRole role = user.getBranchRoles().stream()
                 .filter(r -> r.getBranch().getId().equals(request.getBranchId()))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("No tienes acceso a esta sucursal"));
 
-        if (!passwordEncoder.matches(request.getBranchPin(), role.getBranch().getSecurityPin())) {
-             throw new RuntimeException("PIN de sucursal incorrecto. Acceso denegado.");
-        }
-        
         return new AuthResponse(
             "Login completado", 
             "FULL", 

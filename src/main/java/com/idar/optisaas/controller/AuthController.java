@@ -33,19 +33,19 @@ public class AuthController {
 
     @GetMapping("/my-branches")
     public ResponseEntity<?> getMyBranches(HttpServletRequest request) {
-        String email = getEmailFromCookie(request);
-        return ResponseEntity.ok(authService.getUserBranches(email));
+        String userIdentifier = getAuthenticatedUser(request);
+        
+        return ResponseEntity.ok(authService.getUserBranches(userIdentifier));
     }
 
     @PostMapping("/select-branch")
     public ResponseEntity<?> selectBranch(@RequestBody BranchSelectRequest request, HttpServletRequest httpRequest) {
         try {
-            String email = getEmailFromCookie(httpRequest);
-            AuthResponse response = authService.selectBranch(email, request);
-            
+            String userIdentifier = getAuthenticatedUser(httpRequest);
+            AuthResponse response = authService.selectBranch(userIdentifier, request);
             ResponseCookie cookie = authService.createFullCookie(
-                email, 
-                request.getBranchId(), 
+                userIdentifier, 
+                request.getBranchId(),
                 response.getRole()
             );
 
@@ -65,7 +65,7 @@ public class AuthController {
                 .body("Sesión cerrada");
     }
 
-    private String getEmailFromCookie(HttpServletRequest request) {
+    private String getAuthenticatedUser(HttpServletRequest request) {
         String jwt = jwtUtils.getJwtFromCookies(request);
         if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
             return jwtUtils.getUserNameFromJwtToken(jwt);
