@@ -1,6 +1,7 @@
 package com.idar.optisaas.entity;
 
 import java.util.Set;
+import com.fasterxml.jackson.annotation.JsonIgnore; // <--- IMPORTANTE
 
 import jakarta.persistence.*;
 import lombok.Data;
@@ -20,7 +21,9 @@ public class User {
     @Column(unique = true)
     private String username;
 
+    @JsonIgnore // <--- Ocultar contraseña por seguridad
     private String password;
+    
     private String fullName;
     private boolean active = true;
 

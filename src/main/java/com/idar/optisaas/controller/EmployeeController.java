@@ -38,8 +38,10 @@ public class EmployeeController {
     public ResponseEntity<List<User>> getMyEmployees() {
         Long currentBranchId = TenantContext.getCurrentBranch();
         
+        // Si estamos en modo global (Admin Hub) y no hay sucursal seleccionada,
+        // devolvemos todos los empleados.
         if (currentBranchId == null) {
-            throw new RuntimeException("Debes seleccionar una sucursal para ver los empleados");
+            return ResponseEntity.ok(userService.getAllEmployees());
         }
 
         List<User> employees = userService.getEmployeesByBranch(currentBranchId);

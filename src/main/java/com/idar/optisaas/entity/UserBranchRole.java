@@ -1,6 +1,7 @@
 package com.idar.optisaas.entity;
 
 import com.idar.optisaas.util.Role;
+import com.fasterxml.jackson.annotation.JsonIgnore; // <--- IMPORTANTE
 
 import jakarta.persistence.*;
 import lombok.Data;
@@ -19,6 +20,7 @@ public class UserBranchRole {
     @JoinColumn(name = "user_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonIgnore // <--- ESTO SOLUCIONA LA RECURSIÓN INFINITA
     private User user;
 
     @ManyToOne

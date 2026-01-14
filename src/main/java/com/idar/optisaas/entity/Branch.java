@@ -1,5 +1,6 @@
 package com.idar.optisaas.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore; // <--- IMPORTANTE
 import jakarta.persistence.*;
 import lombok.Data;
 
@@ -15,6 +16,7 @@ public class Branch {
     private String address;
     
     @Column(nullable = false)
+    @JsonIgnore // <--- Ocultar PIN por seguridad
     private String securityPin;
 
     public void setName(String name2) {

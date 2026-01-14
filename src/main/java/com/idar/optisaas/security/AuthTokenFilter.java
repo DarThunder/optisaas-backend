@@ -16,7 +16,7 @@ import com.idar.optisaas.util.JwtUtils;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 
 @Component
@@ -33,21 +33,23 @@ public class AuthTokenFilter extends OncePerRequestFilter {
             
             if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
                 String username = jwtUtils.getUserNameFromJwtToken(jwt);
+                List<SimpleGrantedAuthority> authorities = new ArrayList<>();
                 
+                // Asignamos un rol base para pasar la seguridad de Spring
+                authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
+
+                // Solo si es un token completo, configuramos el TenantContext
                 if (jwtUtils.isFullToken(jwt)) {
                     Long branchId = jwtUtils.getBranchIdFromToken(jwt);
                     TenantContext.setCurrentBranch(branchId); 
-
-                    List<SimpleGrantedAuthority> authorities = Collections.singletonList(
-                            new SimpleGrantedAuthority("ROLE_USER") 
-                    );
-
-                    UsernamePasswordAuthenticationToken authentication = 
-                        new UsernamePasswordAuthenticationToken(username, null, authorities);
-                    
-                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
                 } 
+
+                // Autenticamos al usuario (sea PRE_AUTH o FULL)
+                UsernamePasswordAuthenticationToken authentication = 
+                    new UsernamePasswordAuthenticationToken(username, null, authorities);
+                
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(authentication);
             }
         } catch (Exception e) {
             logger.error("Can't authenticate User", e);

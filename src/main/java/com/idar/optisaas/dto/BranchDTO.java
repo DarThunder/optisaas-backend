@@ -8,6 +8,7 @@ public class BranchDTO {
     private String name;
     private String role;
     private String address;
+    private String pin;
 
     public String getName() {
         return name;

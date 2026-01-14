@@ -79,4 +79,9 @@ public class UserService {
                     .anyMatch(r -> r.getBranch().getId().equals(branchId)))
                 .collect(Collectors.toList());
     }
+
+    // NUEVO MÉTODO AGREGADO
+    public List<User> getAllEmployees() {
+        return userRepository.findAll();
+    }
 }
