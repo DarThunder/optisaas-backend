@@ -44,6 +44,8 @@ public class ClientService {
         existing.setFullName(updatedData.getFullName());
         existing.setPhone(updatedData.getPhone());
         existing.setEmail(updatedData.getEmail());
+        existing.setOccupation(updatedData.getOccupation());
+        existing.setAge(updatedData.getAge());
         // No actualizamos createdAt ni branchId
         
         return clientRepository.save(existing);

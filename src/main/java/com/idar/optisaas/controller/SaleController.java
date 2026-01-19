@@ -2,6 +2,10 @@ package com.idar.optisaas.controller;
 
 import com.idar.optisaas.service.SaleService;
 import com.idar.optisaas.dto.*;
+import com.idar.optisaas.entity.Sale;
+
+import java.util.List;
+
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -39,5 +43,10 @@ public class SaleController {
             
         SaleResponse response = saleService.addPayment(id, request);
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/by-client/{clientId}")
+    public ResponseEntity<List<Sale>> getSalesByClient(@PathVariable Long clientId) {
+        return ResponseEntity.ok(saleService.getSalesByClient(clientId));
     }
 }

@@ -190,4 +190,9 @@ public class SaleService {
         Sale savedSale = saleRepository.save(sale);
         return mapToResponse(savedSale);
     }
+    
+    public List<Sale> getSalesByClient(Long clientId) {
+        return saleRepository.findByClientIdOrderByCreatedAtDesc(clientId);
+    }
+
 }

@@ -1,10 +1,10 @@
 package com.idar.optisaas.entity;
 
 import com.idar.optisaas.model.BaseEntity;
-
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "clinical_records")
@@ -18,75 +18,48 @@ public class ClinicalRecord extends BaseEntity {
     @ManyToOne
     private User optometrist;
 
+    // --- REFRACCIÓN (Rx) ---
     private Double sphereRight;
     private Double sphereLeft;
     private Double cylinderRight;
     private Double cylinderLeft;
     private Integer axisRight;
     private Integer axisLeft;
-    private Double addition;
-    private Double pupillaryDistance;
+    private Double additionRight; 
+    private Double additionLeft;
+    private Double pupillaryDistance; // Lo mantenemos como Double para compatibilidad
+    private Double height;            // Altura
+
+    // --- ANAMNESIS (Nuevos campos) ---
+    private boolean diabetes;
+    private boolean hypertension;
+    private boolean familyHistory;
     
+    private boolean tearing;        // Lagrimeo
+    private boolean burning;        // Ardor
+    private boolean itching;        // Comezón
+    private boolean secretion;      // Lagaña
+    private boolean photophobiaSolar;
+    private boolean photophobiaArtificial;
+    
+    private boolean usesGlasses;
+    private boolean usesContacts;
+    private LocalDate lastRxDate;
+
+    // --- AGUDEZA VISUAL ---
+    private String avScOd;
+    private String avScOi;
+    private String avScAo;
+    private String avScNear;
+
+    private String avCcOd;
+    private String avCcOi;
+    private String avCcAo;
+    private String avCcNear;
+
+    private String avPhOd;
+    private String avPhOi;
+
     @Column(columnDefinition = "TEXT")
     private String notes;
-
-    public void setClient(Client client2) {
-        client = client2;
-    }
-
-    public void setOptometrist(User optometrist2) {
-        optometrist = optometrist2;
-    }
-
-    public void setSphereRight(Double sphereRight2) {
-        sphereRight = sphereRight2;
-    }
-
-    public void setSphereLeft(Double sphereLeft2) {
-        sphereLeft = sphereLeft2;
-    }
-
-    public void setCylinderRight(Double cylinderRight2) {
-        cylinderRight = cylinderRight2;
-    }
-
-    public void setCylinderLeft(Double cylinderLeft2) {
-        cylinderLeft = cylinderLeft2;
-    }
-
-    public void setAxisRight(Integer axisRight2) {
-        axisRight = axisRight2;
-    }
-
-    public void setAxisLeft(Integer axisLeft2) {
-        axisLeft = axisLeft2;
-    }
-
-    public void setAddition(Double addition2) {
-        addition = addition2;
-    }
-
-    public void setPupillaryDistance(Double pupillaryDistance2) {
-        pupillaryDistance = pupillaryDistance2;
-    }
-
-    public void setNotes(String notes2) {
-        notes = notes2;
-    }
-
-    public Double getCylinderRight() {
-        return cylinderRight;
-    }
-
-    public Double getCylinderLeft() {
-        return cylinderLeft;
-    }
-
-    public Double getSphereRight() {
-        return sphereRight;
-    }
-
-    public Double getSphereLeft() {
-        return sphereLeft;
-    }
 }
