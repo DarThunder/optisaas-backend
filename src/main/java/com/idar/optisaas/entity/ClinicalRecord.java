@@ -1,6 +1,7 @@
 package com.idar.optisaas.entity;
 
 import com.idar.optisaas.model.BaseEntity;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties; // <--- ESTA IMPORTACIÓN ES VITAL
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -11,37 +12,47 @@ import java.time.LocalDate;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class ClinicalRecord extends BaseEntity {
-    
-    @ManyToOne
+
+    // VINCULAMOS LA ANOTACIÓN PARA EVITAR EL ERROR DE JSON/SERIALIZACIÓN
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "client_id", nullable = false)
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"}) 
     private Client client;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "optometrist_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private User optometrist;
+
+    @Column(nullable = false)
+    private LocalDate date;
 
     // --- REFRACCIÓN (Rx) ---
     private Double sphereRight;
-    private Double sphereLeft;
     private Double cylinderRight;
-    private Double cylinderLeft;
     private Integer axisRight;
-    private Integer axisLeft;
     private Double additionRight; 
-    private Double additionLeft;
-    private Double pupillaryDistance; // Lo mantenemos como Double para compatibilidad
-    private Double height;            // Altura
 
-    // --- ANAMNESIS (Nuevos campos) ---
+    private Double sphereLeft;
+    private Double cylinderLeft;
+    private Integer axisLeft;
+    private Double additionLeft;
+
+    private Double pupillaryDistance;
+    private Double height;
+
+    // --- ANAMNESIS ---
     private boolean diabetes;
     private boolean hypertension;
     private boolean familyHistory;
     
-    private boolean tearing;        // Lagrimeo
-    private boolean burning;        // Ardor
-    private boolean itching;        // Comezón
-    private boolean secretion;      // Lagaña
+    private boolean tearing;
+    private boolean burning;
+    private boolean itching;
+    private boolean secretion;
     private boolean photophobiaSolar;
     private boolean photophobiaArtificial;
-    
+
     private boolean usesGlasses;
     private boolean usesContacts;
     private LocalDate lastRxDate;
@@ -60,6 +71,10 @@ public class ClinicalRecord extends BaseEntity {
     private String avPhOd;
     private String avPhOi;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(length = 1000)
     private String notes;
+    
+    // Métodos de compatibilidad
+    public Double getAddRight() { return additionRight; }
+    public Double getAddLeft() { return additionLeft; }
 }

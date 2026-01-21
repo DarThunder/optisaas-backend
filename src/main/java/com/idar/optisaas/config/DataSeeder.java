@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate; // Importante para la fecha
 import java.util.Set;
 
 @Component
@@ -20,6 +21,7 @@ public class DataSeeder implements CommandLineRunner {
     @Autowired private UserRepository userRepository;
     @Autowired private ClientRepository clientRepository;
     @Autowired private ProductRepository productRepository;
+    @Autowired private ClinicalRecordRepository clinicalRecordRepository; // Nuevo repo
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private PriceMatrixRepository priceMatrixRepository;
 
@@ -33,12 +35,14 @@ public class DataSeeder implements CommandLineRunner {
 
         System.out.println(">>> INICIANDO DATA SEEDER (GOD MODE)...");
 
+        // 1. SUCURSAL
         Branch branch = new Branch();
         branch.setName("Sucursal Central");
         branch.setAddress("Calle Falsa 123");
         branch.setSecurityPin(passwordEncoder.encode("1234"));
         Branch savedBranch = branchRepository.save(branch);
 
+        // 2. USUARIO ADMIN / OPTOMETRISTA
         User user = new User();
         user.setEmail("admin@opti.com");
         user.setUsername("admin");
@@ -52,15 +56,44 @@ public class DataSeeder implements CommandLineRunner {
         role.setRole(Role.MANAGER);
         
         user.setBranchRoles(Set.of(role));
-        userRepository.save(user);
+        User savedUser = userRepository.save(user);
 
+        // 3. CLIENTE
         Client client = new Client();
         client.setFullName("Cliente Victima");
         client.setEmail("victima@test.com");
         client.setPhone("555-0000");
         client.setBranchId(savedBranch.getId());
-        clientRepository.save(client);
+        Client savedClient = clientRepository.save(client);
 
+        // 4. HISTORIAL CLÍNICO (NUEVO: Para que funcione el POS)
+        ClinicalRecord record = new ClinicalRecord();
+        record.setBranchId(savedBranch.getId());
+        record.setClient(savedClient);      // Relación Objeto
+        record.setOptometrist(savedUser);   // Relación Objeto
+        record.setDate(LocalDate.now());    // Fecha obligatoria (LocalDate)
+        
+        // Rx Lejos (Miopía con Astigmatismo)
+        record.setSphereRight(-1.50);
+        record.setCylinderRight(-0.50);
+        record.setAxisRight(180);
+        
+        record.setSphereLeft(-1.75);
+        record.setCylinderLeft(-0.25);
+        record.setAxisLeft(175);
+
+        // Adición (Para probar Progresivos/Bifocales)
+        record.setAdditionRight(2.00);
+        record.setAdditionLeft(2.00);
+
+        // Medidas Físicas (Double, no String)
+        record.setPupillaryDistance(63.0); 
+        record.setHeight(22.0); 
+        
+        record.setNotes("Paciente de prueba generado automáticamente.");
+        clinicalRecordRepository.save(record);
+
+        // 5. PRODUCTOS
         Product product = new Product();
         product.setSku("LENS-001");
         product.setBrand("RayBan");
@@ -81,6 +114,7 @@ public class DataSeeder implements CommandLineRunner {
         treatment.setBranchId(savedBranch.getId());
         productRepository.save(treatment);
 
+        // 6. REGLAS DE PRECIO (Legacy)
         PriceMatrix matrix = new PriceMatrix();
         matrix.setName("Lista General 2026");
         matrix.setActive(true);
@@ -97,6 +131,6 @@ public class DataSeeder implements CommandLineRunner {
         matrix.setRules(java.util.List.of(rule));
         priceMatrixRepository.save(matrix);
 
-        System.out.println(">>> SEED COMPLETADO: Admin (123456) / Branch (1234) creados.");
+        System.out.println(">>> SEED COMPLETADO: Datos creados exitosamente.");
     }
 }

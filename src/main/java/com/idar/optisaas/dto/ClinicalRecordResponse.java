@@ -4,24 +4,26 @@ import lombok.Data;
 import java.time.LocalDate;
 
 @Data
-public class ClinicalRecordRequest {
+public class ClinicalRecordResponse {
+    private Long id;
     private Long clientId;
+    private String clientName;      
+    private Long optometristId;
+    private String optometristName; 
+    private LocalDate date;
     private String notes;
 
-    // --- REFRACCIÓN (Rx) ---
     private Double sphereRight;
-    private Double sphereLeft;
     private Double cylinderRight;
-    private Double cylinderLeft;
     private Integer axisRight;
+    private Double additionRight;
+    private Double sphereLeft;
+    private Double cylinderLeft;
     private Integer axisLeft;
-    private Double additionRight; 
     private Double additionLeft;
-    
-    private String pupillaryDistance; 
-    private String height;            
+    private Double pupillaryDistance;
+    private Double height;
 
-    // --- ANAMNESIS ---
     private boolean diabetes;
     private boolean hypertension;
     private boolean familyHistory;
@@ -35,7 +37,6 @@ public class ClinicalRecordRequest {
     private boolean usesContacts;
     private LocalDate lastRxDate;
 
-    // --- AGUDEZA VISUAL ---
     private String avScOd;
     private String avScOi;
     private String avScAo;
