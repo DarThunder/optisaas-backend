@@ -1,16 +1,13 @@
 package com.idar.optisaas.entity;
 
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-
-import java.util.ArrayList;
-import java.util.List;
+import com.idar.optisaas.model.BaseEntity;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import java.util.List;
 
-import com.idar.optisaas.model.BaseEntity;
-import com.idar.optisaas.model.PriceRule;
+// IMPORTANTE: No importes com.idar.optisaas.model.PriceRule si estás usando entity.PriceRule
+// O importa explícitamente el que acabas de editar en el Paso 1.
 
 @Entity
 @Table(name = "price_matrices")
@@ -20,12 +17,10 @@ public class PriceMatrix extends BaseEntity {
 
     private String name;
     private boolean active;
+    
+    private Long branchId;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
-    private List<PriceRule> rules = new ArrayList<>();
-
-    public List<PriceRule> getRules() {
-        return rules;
-    }
+    @ElementCollection(fetch = FetchType.EAGER) // Eager para que al cargar la matriz traiga las reglas
+    @CollectionTable(name = "price_matrix_rules", joinColumns = @JoinColumn(name = "matrix_id"))
+    private List<PriceRule> rules; // Asegúrate que este PriceRule sea el del Paso 1
 }

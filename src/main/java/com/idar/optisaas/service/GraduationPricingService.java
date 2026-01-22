@@ -1,71 +1,121 @@
 package com.idar.optisaas.service;
 
+import com.idar.optisaas.dto.PriceCalculationRequest;
+import com.idar.optisaas.dto.PriceResponse;
 import com.idar.optisaas.entity.ClinicalRecord;
+import com.idar.optisaas.entity.LensBasePrice;
+import com.idar.optisaas.entity.PriceMatrix;
+// IMPORTANTE: Usamos la entidad, NO el modelo
+import com.idar.optisaas.entity.PriceRule; 
+import com.idar.optisaas.repository.ClinicalRecordRepository;
+import com.idar.optisaas.repository.LensBasePriceRepository;
+import com.idar.optisaas.repository.PriceMatrixRepository;
+import com.idar.optisaas.security.TenantContext;
 import com.idar.optisaas.util.LensDesignType;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
 import java.math.BigDecimal;
+import java.util.Optional;
 
 @Service
 public class GraduationPricingService {
 
-    // --- PRECIOS BASE CONFIGURABLES (Idealmente vendrían de DB) ---
-    private static final BigDecimal BASE_MONOFOCAL = new BigDecimal("500.00");
-    private static final BigDecimal BASE_BIFOCAL_FT = new BigDecimal("800.00");
-    private static final BigDecimal BASE_BIFOCAL_INV = new BigDecimal("1200.00");
-    private static final BigDecimal BASE_PROGRESSIVE = new BigDecimal("1800.00");
+    @Autowired private ClinicalRecordRepository recordRepository;
+    @Autowired private LensBasePriceRepository lensBasePriceRepository;
+    @Autowired private PriceMatrixRepository priceMatrixRepository;
 
-    // --- RECARGOS (SURCHARGES) ---
-    private static final BigDecimal SURCHARGE_HIGH_CYLINDER = new BigDecimal("250.00"); // Cil > 2.00
-    private static final BigDecimal SURCHARGE_HIGH_SPHERE = new BigDecimal("200.00");   // Esfera > 4.00
-    private static final BigDecimal SURCHARGE_EXTRA_HIGH = new BigDecimal("500.00");    // Esfera > 6.00 o Cil > 4.00
+    public PriceResponse calculatePrice(PriceCalculationRequest request) {
+        // 1. Obtener Receta
+        ClinicalRecord rx = recordRepository.findById(request.getRxId())
+                .orElseThrow(() -> new RuntimeException("Receta no encontrada"));
 
-    public BigDecimal calculateLensPrice(ClinicalRecord rx, LensDesignType type) {
-        if (rx == null) return BigDecimal.ZERO;
+        LensDesignType type = request.getLensType();
+        StringBuilder details = new StringBuilder();
 
-        // 1. Obtener Precio Base según el Diseño
-        BigDecimal finalPrice = getBasePriceByType(type);
+        // 2. OBTENER PRECIO BASE POR TIPO (Desde Configuración de Precios)
+        BigDecimal baseTypePrice = getBasePriceFromDB(type);
+        details.append("Base ").append(translateType(type)).append(": $").append(baseTypePrice);
 
-        // 2. Analizar la Graduación (Tomamos el "peor" ojo para calcular el rango)
-        double maxSphere = Math.max(Math.abs(rx.getSphereRight()), Math.abs(rx.getSphereLeft()));
-        double maxCylinder = Math.max(Math.abs(rx.getCylinderRight()), Math.abs(rx.getCylinderLeft()));
-        // La adición solo importa si es bifocal/progresivo
-        double maxAdd = (type != LensDesignType.MONOFOCAL) 
-        ? Math.max(rx.getAdditionRight() != null ? rx.getAdditionRight() : 0.0, 
-                   rx.getAdditionLeft() != null ? rx.getAdditionLeft() : 0.0) 
-        : 0.0;
-
-        // 3. Aplicar Reglas de la Matriz (Lógica de Negocio)
+        // 3. BUSCAR EN MATRIZ DE PRECIOS (Por Graduación)
+        BigDecimal matrixPrice = BigDecimal.ZERO;
         
-        // REGLA A: Cilindro Alto (Astigmatismo)
-        // Si el cilindro pasa de 2.00, se cobra extra.
-        if (maxCylinder > 2.00 && maxCylinder <= 4.00) {
-            finalPrice = finalPrice.add(SURCHARGE_HIGH_CYLINDER);
-        } else if (maxCylinder > 4.00) {
-            finalPrice = finalPrice.add(SURCHARGE_EXTRA_HIGH); // Fabricación especial
+        // Tomamos la graduación más alta de los dos ojos
+        Double worstSphere = getWorstValue(rx.getSphereRight(), rx.getSphereLeft());
+        Double worstCyl = getWorstValue(rx.getCylinderRight(), rx.getCylinderLeft());
+
+        // Buscamos la matriz activa de la sucursal
+        Optional<PriceMatrix> activeMatrix = priceMatrixRepository.findByBranchIdAndActiveTrue(TenantContext.getCurrentBranch());
+
+        if (activeMatrix.isPresent()) {
+            // Buscamos una regla que coincida
+            for (PriceRule rule : activeMatrix.get().getRules()) {
+                if (isRxInRule(worstSphere, worstCyl, rule)) {
+                    matrixPrice = rule.getPrice();
+                    details.append(" | Regla Matriz detectada: $").append(matrixPrice);
+                    break; // Encontramos la regla, dejamos de buscar
+                }
+            }
         }
 
-        // REGLA B: Esfera Alta (Miopía/Hipermetropía fuerte)
-        if (maxSphere > 4.00 && maxSphere <= 6.00) {
-            finalPrice = finalPrice.add(SURCHARGE_HIGH_SPHERE);
-        } else if (maxSphere > 6.00) {
-            finalPrice = finalPrice.add(SURCHARGE_EXTRA_HIGH);
-        }
-
-        // REGLA C: Adición Alta (Opcional, común en progresivos complejos)
-        if (maxAdd > 3.00) {
-            finalPrice = finalPrice.add(new BigDecimal("150.00"));
-        }
-
-        return finalPrice;
+        // 4. LÓGICA DE NEGOCIO: El precio es el MAYOR entre el Base y la Matriz.
+        BigDecimal finalPrice = baseTypePrice.max(matrixPrice);
+        
+        return new PriceResponse(finalPrice, details.toString());
     }
 
-    private BigDecimal getBasePriceByType(LensDesignType type) {
-        switch (type) {
-            case MONOFOCAL: return BASE_MONOFOCAL;
-            case BIFOCAL_FLAT_TOP: return BASE_BIFOCAL_FT;
-            case BIFOCAL_INVISIBLE: return BASE_BIFOCAL_INV;
-            case PROGRESSIVE: return BASE_PROGRESSIVE;
-            default: return BASE_MONOFOCAL;
+    // --- MÉTODOS AUXILIARES ---
+
+    private BigDecimal getBasePriceFromDB(LensDesignType type) {
+        if (type == null) return BigDecimal.ZERO;
+        Long branchId = TenantContext.getCurrentBranch();
+        return lensBasePriceRepository.findByDesignTypeAndBranchId(type, branchId)
+                .map(LensBasePrice::getPrice)
+                .orElse(BigDecimal.ZERO);
+    }
+
+    private boolean isRxInRule(Double sphere, Double cyl, PriceRule rule) {
+        // Convertimos nulls a 0.0 para evitar errores
+        double s = sphere == null ? 0.0 : sphere;
+        double c = cyl == null ? 0.0 : cyl;
+
+        // Validamos usando los getters genéricos (asegúrate que tu entidad PriceRule tenga estos campos)
+        // Si tu entidad PriceRule usa 'minSphere' en vez de 'min' y 'type', ajusta aquí.
+        // Asumiendo la versión moderna con 'type', 'min', 'max':
+        
+        if ("SPHERE".equals(rule.getType())) {
+             double min = rule.getMin() != null ? rule.getMin() : -999;
+             double max = rule.getMax() != null ? rule.getMax() : 999;
+             return s >= min && s <= max;
         }
+        
+        // Si tu entidad PriceRule es la VIEJA (con minSphere, maxSphere):
+        /*
+        boolean sphereMatch = s >= (rule.getMinSphere() != null ? rule.getMinSphere() : -999) 
+                           && s <= (rule.getMaxSphere() != null ? rule.getMaxSphere() : 999);
+        
+        boolean cylMatch = c >= (rule.getMinCylinder() != null ? rule.getMinCylinder() : -999) 
+                        && c <= (rule.getMaxCylinder() != null ? rule.getMaxCylinder() : 0); // Cilindro suele ser negativo, max 0
+
+        return sphereMatch && cylMatch;
+        */
+        
+        return false; // Por defecto si no coincide tipo
+    }
+
+    private Double getWorstValue(Double v1, Double v2) {
+        if (v1 == null) v1 = 0.0;
+        if (v2 == null) v2 = 0.0;
+        return Math.abs(v1) > Math.abs(v2) ? v1 : v2;
+    }
+
+    private String translateType(LensDesignType type) {
+        if (type == null) return "Lente";
+        return switch (type) {
+            case MONOFOCAL -> "Monofocal";
+            case BIFOCAL_FLAT_TOP -> "Bifocal FT";
+            case BIFOCAL_INVISIBLE -> "Blended";
+            case PROGRESSIVE -> "Progresivo";
+        };
     }
 }

@@ -1,7 +1,6 @@
 package com.idar.optisaas.config;
 
 import com.idar.optisaas.entity.*;
-import com.idar.optisaas.model.PriceRule;
 import com.idar.optisaas.repository.*;
 import com.idar.optisaas.util.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,7 +10,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDate; // Importante para la fecha
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 @Component
@@ -21,9 +22,10 @@ public class DataSeeder implements CommandLineRunner {
     @Autowired private UserRepository userRepository;
     @Autowired private ClientRepository clientRepository;
     @Autowired private ProductRepository productRepository;
-    @Autowired private ClinicalRecordRepository clinicalRecordRepository; // Nuevo repo
+    @Autowired private ClinicalRecordRepository clinicalRecordRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private PriceMatrixRepository priceMatrixRepository;
+    @Autowired private LensBasePriceRepository lensBasePriceRepository;
 
     @Override
     @Transactional
@@ -42,7 +44,7 @@ public class DataSeeder implements CommandLineRunner {
         branch.setSecurityPin(passwordEncoder.encode("1234"));
         Branch savedBranch = branchRepository.save(branch);
 
-        // 2. USUARIO ADMIN / OPTOMETRISTA
+        // 2. USUARIO
         User user = new User();
         user.setEmail("admin@opti.com");
         user.setUsername("admin");
@@ -66,71 +68,87 @@ public class DataSeeder implements CommandLineRunner {
         client.setBranchId(savedBranch.getId());
         Client savedClient = clientRepository.save(client);
 
-        // 4. HISTORIAL CLÍNICO (NUEVO: Para que funcione el POS)
+        // 4. HISTORIAL CLÍNICO
         ClinicalRecord record = new ClinicalRecord();
         record.setBranchId(savedBranch.getId());
-        record.setClient(savedClient);      // Relación Objeto
-        record.setOptometrist(savedUser);   // Relación Objeto
-        record.setDate(LocalDate.now());    // Fecha obligatoria (LocalDate)
-        
-        // Rx Lejos (Miopía con Astigmatismo)
+        record.setClient(savedClient);
+        record.setOptometrist(savedUser);
+        record.setDate(LocalDate.now());
         record.setSphereRight(-1.50);
         record.setCylinderRight(-0.50);
         record.setAxisRight(180);
-        
         record.setSphereLeft(-1.75);
         record.setCylinderLeft(-0.25);
         record.setAxisLeft(175);
-
-        // Adición (Para probar Progresivos/Bifocales)
         record.setAdditionRight(2.00);
         record.setAdditionLeft(2.00);
-
-        // Medidas Físicas (Double, no String)
         record.setPupillaryDistance(63.0); 
         record.setHeight(22.0); 
-        
         record.setNotes("Paciente de prueba generado automáticamente.");
         clinicalRecordRepository.save(record);
 
         // 5. PRODUCTOS
-        Product product = new Product();
-        product.setSku("LENS-001");
-        product.setBrand("RayBan");
-        product.setModel("Aviator");
-        product.setType(ProductType.FRAME);
-        product.setBasePrice(new BigDecimal("150.00"));
-        product.setStockQuantity(10);
-        product.setBranchId(savedBranch.getId());
-        productRepository.save(product);
+        createProduct(savedBranch.getId(), "LENS-001", "RayBan", "Aviator", ProductType.FRAME, "150.00", null);
+        createProduct(savedBranch.getId(), "TREAT-BLUE", "OptiLab", "BlueBlock Filter", ProductType.SERVICE, "500.00", "TRATAMIENTO");
+        createProduct(savedBranch.getId(), "MAT-POLY", "Generic", "Policarbonato", ProductType.LENS, "450.00", "MATERIAL");
 
-        Product treatment = new Product();
-        treatment.setSku("TREAT-BLUE");
-        treatment.setBrand("OptiLab");
-        treatment.setModel("BlueBlock Filter");
-        treatment.setType(ProductType.SERVICE);
-        treatment.setBasePrice(new BigDecimal("500.00"));
-        treatment.setStockQuantity(9999);
-        treatment.setBranchId(savedBranch.getId());
-        productRepository.save(treatment);
-
-        // 6. REGLAS DE PRECIO (Legacy)
+        // 6. REGLAS DE PRECIO (MATRIZ INTELIGENTE)
         PriceMatrix matrix = new PriceMatrix();
         matrix.setName("Lista General 2026");
         matrix.setActive(true);
         matrix.setBranchId(savedBranch.getId());
 
-        PriceRule rule = new PriceRule();
-        rule.setMaterial("CR39");
-        rule.setMinSphere(-10.0);
-        rule.setMaxSphere(10.0);
-        rule.setMinCylinder(-4.0);
-        rule.setMaxCylinder(0.0);
-        rule.setPrice(new BigDecimal("350.00"));
+        List<PriceRule> rules = new ArrayList<>();
 
-        matrix.setRules(java.util.List.of(rule));
+        // Regla A: Esferas Bajas (0 a 2.00) -> Precio Base incluido en el tipo de lente (o extra bajo)
+        rules.add(new PriceRule("SPHERE", 0.00, 2.00, BigDecimal.ZERO, null)); 
+        
+        // Regla B: Esferas Medias (2.25 a 4.00) -> +$100
+        rules.add(new PriceRule("SPHERE", 2.25, 4.00, new BigDecimal("100.00"), null));
+
+        // Regla C: Esferas Altas (4.25 a 10.00) -> +$350
+        rules.add(new PriceRule("SPHERE", 4.25, 10.00, new BigDecimal("350.00"), null));
+
+        // Regla D: Cilindro Alto (> 2.00) -> +$200
+        rules.add(new PriceRule("CYLINDER", 2.25, 6.00, new BigDecimal("200.00"), null));
+
+        // Regla E: Lente Positivo (Hipermetropía) -> +$150
+        rules.add(new PriceRule("POSITIVE", null, null, new BigDecimal("150.00"), null));
+
+        matrix.setRules(rules);
         priceMatrixRepository.save(matrix);
 
+        // 7. PRECIOS BASE DE LENTES (CONFIGURACIÓN)
+        createBasePrice(savedBranch.getId(), LensDesignType.MONOFOCAL, new BigDecimal("500.00"), "Visión Sencilla");
+        createBasePrice(savedBranch.getId(), LensDesignType.BIFOCAL_FLAT_TOP, new BigDecimal("800.00"), "Bifocal con línea");
+        createBasePrice(savedBranch.getId(), LensDesignType.BIFOCAL_INVISIBLE, new BigDecimal("1200.00"), "Redondo Invisible (Blended)");
+        createBasePrice(savedBranch.getId(), LensDesignType.PROGRESSIVE, new BigDecimal("1800.00"), "Progresivo Multifocal");
+
         System.out.println(">>> SEED COMPLETADO: Datos creados exitosamente.");
+    }
+
+    // Helpers para limpiar el código
+    private void createBasePrice(Long branchId, LensDesignType type, BigDecimal price, String desc) {
+        if (lensBasePriceRepository.findByDesignTypeAndBranchId(type, branchId).isEmpty()) {
+            LensBasePrice lbp = new LensBasePrice();
+            lbp.setBranchId(branchId);
+            lbp.setDesignType(type);
+            lbp.setPrice(price);
+            lbp.setDescription(desc);
+            lensBasePriceRepository.save(lbp);
+        }
+    }
+
+    private void createProduct(Long branchId, String sku, String brand, String model, ProductType type, String price, String category) {
+        Product p = new Product();
+        p.setSku(sku);
+        p.setBrand(brand);
+        p.setModel(model);
+        p.setType(type);
+        p.setBasePrice(new BigDecimal(price));
+        p.setStockQuantity(10);
+        p.setBranchId(branchId);
+        if (category != null) p.setCategory(category);
+        productRepository.save(p);
     }
 }
