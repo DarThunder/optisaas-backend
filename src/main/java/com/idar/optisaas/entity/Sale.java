@@ -16,6 +16,12 @@ import java.util.List;
 @EqualsAndHashCode(callSuper = true)
 public class Sale extends BaseEntity {
 
+    // --- CORRECCIÓN: Marcamos como solo lectura para evitar conflicto con BaseEntity ---
+    @ManyToOne
+    @JoinColumn(name = "branch_id", insertable = false, updatable = false)
+    private Branch branch;
+    // ----------------------------------------------------------------------------------
+
     @ManyToOne
     @JoinColumn(name = "client_id", nullable = false)
     private Client client;

@@ -7,6 +7,7 @@ public class TenantContext {
         CURRENT_BRANCH.set(branchId);
     }
 
+    // VOLVEMOS AL NOMBRE ORIGINAL
     public static Long getCurrentBranch() {
         return CURRENT_BRANCH.get();
     }

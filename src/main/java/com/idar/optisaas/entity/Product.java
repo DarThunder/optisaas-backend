@@ -1,36 +1,46 @@
 package com.idar.optisaas.entity;
 
-import java.math.BigDecimal;
+import com.idar.optisaas.model.BaseEntity;
+import com.idar.optisaas.util.ProductType;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import com.idar.optisaas.model.BaseEntity;
-import com.idar.optisaas.util.ProductType;
+
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "products")
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class Product extends BaseEntity {
-    
-    @Column(unique = true)
-    private String sku; // Código único
-    
+
+    // --- CORRECCIÓN: Solo lectura ---
+    @ManyToOne
+    @JoinColumn(name = "branch_id", nullable = false, insertable = false, updatable = false)
+    private Branch branch;
+    // --------------------------------
+
+    @Column(nullable = false)
+    private String sku;
+
+    @Column(nullable = false)
     private String brand;
-    private String model; // En servicios/lentes usaremos esto como el "Nombre"
+
+    @Column(nullable = false)
+    private String model;
+
+    private String color;
     
-    // Campo nuevo para armazones (ej. "Negro Mate")
-    private String color; 
-    
-    // Campo nuevo para diferenciar Solar/Oftálmico o Clínico/Taller
     private String category; 
 
-    // Campo nuevo para Servicios (ej. "30 min")
-    private String duration;
-
     @Enumerated(EnumType.STRING)
-    private ProductType type; // FRAME, LENS, SERVICE, ACCESSORY
-    
+    @Column(nullable = false)
+    private ProductType type;
+
+    @Column(nullable = false)
     private BigDecimal basePrice;
-    private Integer stockQuantity;
+
+    private Integer stockQuantity = 0;
+    
+    private Integer duration; 
 }

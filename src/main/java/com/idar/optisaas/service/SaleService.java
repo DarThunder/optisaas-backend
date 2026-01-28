@@ -4,6 +4,7 @@ import com.idar.optisaas.entity.*;
 import com.idar.optisaas.util.*;
 import com.idar.optisaas.dto.*;
 import com.idar.optisaas.repository.*;
+import com.idar.optisaas.security.TenantContext; 
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -13,6 +14,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors; 
 
 @Service
 public class SaleService {
@@ -22,9 +24,28 @@ public class SaleService {
     @Autowired private ClientRepository clientRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private ClinicalRecordRepository clinicalRepository;
+    @Autowired private BranchRepository branchRepository; 
+
+    // --- Obtener todas las ventas filtradas por sucursal ---
+    public List<SaleResponse> getAllSales() {
+        // CORREGIDO: Usamos getCurrentBranch()
+        Long currentBranchId = TenantContext.getCurrentBranch();
+        
+        List<Sale> sales = saleRepository.findByBranchIdOrderByCreatedAtDesc(currentBranchId);
+        
+        return sales.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
 
     @Transactional
     public SaleResponse createSale(SaleRequest request, String sellerEmail) {
+        // CORREGIDO: Usamos getCurrentBranch()
+        Long branchId = TenantContext.getCurrentBranch();
+        
+        Branch branch = branchRepository.findById(branchId)
+                .orElseThrow(() -> new RuntimeException("Sucursal no encontrada"));
+
         Client client = clientRepository.findById(request.getClientId())
                 .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
         
@@ -32,6 +53,8 @@ public class SaleService {
                 .orElseThrow(() -> new RuntimeException("Vendedor no encontrado"));
 
         Sale sale = new Sale();
+        sale.setBranch(branch); 
+        sale.setBranchId(branch.getId());
         sale.setClient(client);
         sale.setSeller(seller);
         sale.setCreatedAt(LocalDateTime.now());
@@ -51,6 +74,10 @@ public class SaleService {
         for (SaleItemRequest itemReq : request.getItems()) {
             Product product = productRepository.findByIdForUpdate(itemReq.getProductId())
             .orElseThrow(() -> new RuntimeException("Producto no encontrado ID: " + itemReq.getProductId()));
+
+            if (!product.getBranch().getId().equals(branchId)) {
+                throw new RuntimeException("El producto " + product.getModel() + " no pertenece a esta sucursal");
+            }
 
             if (product.getType() != ProductType.SERVICE && !request.isQuotation()) {
                 if (product.getStockQuantity() < itemReq.getQuantity()) {
@@ -130,25 +157,43 @@ public class SaleService {
         response.setSaleId(sale.getId());
         response.setStatus(sale.getStatus().name());
         response.setDate(sale.getCreatedAt());
-        response.setClientName(sale.getClient().getFullName());
+        if (sale.getClient() != null) {
+            response.setClientName(sale.getClient().getFullName());
+        } else {
+            response.setClientName("Cliente General");
+        }
         response.setTotalAmount(sale.getTotalAmount());
         response.setPaidAmount(sale.getPaidAmount());
-        response.setRemainingBalance(sale.getRemainingBalance());
+        
+        if (sale.getRemainingBalance() != null) {
+             response.setRemainingBalance(sale.getRemainingBalance());
+        } else {
+             response.setRemainingBalance(sale.getTotalAmount().subtract(sale.getPaidAmount()));
+        }
         
         return response;
     }
 
     public SaleResponse getSaleById(Long id) {
-        Sale sale = saleRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Venta no encontrada"));
+        // CORREGIDO: Usamos getCurrentBranch()
+        Long currentBranchId = TenantContext.getCurrentBranch();
+        Sale sale = saleRepository.findByIdAndBranchId(id, currentBranchId)
+                .orElseThrow(() -> new RuntimeException("Venta no encontrada o no pertenece a esta sucursal"));
         
         return mapToResponse(sale);
     }
 
     @Transactional
     public SaleResponse addPayment(Long saleId, PaymentRequest paymentRequest) {
+        // CORREGIDO: Usamos getCurrentBranch()
+        Long currentBranchId = TenantContext.getCurrentBranch();
+        
         Sale sale = saleRepository.findByIdForUpdate(saleId)
             .orElseThrow(() -> new RuntimeException("Venta no encontrada"));
+
+        if (!sale.getBranch().getId().equals(currentBranchId)) {
+             throw new RuntimeException("No tienes permiso para modificar ventas de otra sucursal");
+        }
 
         if (sale.getStatus() == SaleStatus.CANCELLED) {
             throw new RuntimeException("No se pueden agregar pagos a una venta cancelada");
@@ -192,7 +237,8 @@ public class SaleService {
     }
     
     public List<Sale> getSalesByClient(Long clientId) {
-        return saleRepository.findByClientIdOrderByCreatedAtDesc(clientId);
+        // CORREGIDO: Usamos getCurrentBranch()
+        Long currentBranchId = TenantContext.getCurrentBranch();
+        return saleRepository.findByClientIdAndBranchIdOrderByCreatedAtDesc(clientId, currentBranchId);
     }
-
 }
