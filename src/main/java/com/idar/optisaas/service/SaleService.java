@@ -26,21 +26,18 @@ public class SaleService {
     @Autowired private ClinicalRecordRepository clinicalRepository;
     @Autowired private BranchRepository branchRepository; 
 
-    // --- Obtener todas las ventas filtradas por sucursal ---
+    // --- OBTENER TODAS LAS VENTAS ---
     public List<SaleResponse> getAllSales() {
-        // CORREGIDO: Usamos getCurrentBranch()
         Long currentBranchId = TenantContext.getCurrentBranch();
-        
         List<Sale> sales = saleRepository.findByBranchIdOrderByCreatedAtDesc(currentBranchId);
-        
         return sales.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
+    // --- CREAR VENTA ---
     @Transactional
     public SaleResponse createSale(SaleRequest request, String sellerEmail) {
-        // CORREGIDO: Usamos getCurrentBranch()
         Long branchId = TenantContext.getCurrentBranch();
         
         Branch branch = branchRepository.findById(branchId)
@@ -54,15 +51,12 @@ public class SaleService {
 
         Sale sale = new Sale();
         sale.setBranch(branch); 
-        sale.setBranchId(branch.getId());
         sale.setClient(client);
         sale.setSeller(seller);
         sale.setCreatedAt(LocalDateTime.now());
         
         if (request.isQuotation()) {
             sale.setStatus(SaleStatus.QUOTATION);
-        } else if (request.isParkSale()) {
-            sale.setStatus(SaleStatus.PENDING);
         } else {
             sale.setStatus(SaleStatus.PENDING); 
         }
@@ -75,10 +69,12 @@ public class SaleService {
             Product product = productRepository.findByIdForUpdate(itemReq.getProductId())
             .orElseThrow(() -> new RuntimeException("Producto no encontrado ID: " + itemReq.getProductId()));
 
+            // Validar Sucursal
             if (!product.getBranch().getId().equals(branchId)) {
                 throw new RuntimeException("El producto " + product.getModel() + " no pertenece a esta sucursal");
             }
 
+            // Descontar Stock
             if (product.getType() != ProductType.SERVICE && !request.isQuotation()) {
                 if (product.getStockQuantity() < itemReq.getQuantity()) {
                     throw new RuntimeException("Stock insuficiente para: " + product.getModel());
@@ -114,6 +110,7 @@ public class SaleService {
         sale.setItems(itemsEntities);
         sale.setTotalAmount(totalSaleAmount);
 
+        // Procesar Pagos Iniciales
         BigDecimal totalPaid = BigDecimal.ZERO;
         List<Payment> paymentEntities = new ArrayList<>();
 
@@ -133,35 +130,46 @@ public class SaleService {
         sale.setPayments(paymentEntities);
         sale.setPaidAmount(totalPaid);
 
+        // --- LÓGICA DE ESTADO INICIAL ---
         if (!request.isQuotation() && !request.isParkSale()) {
             BigDecimal remaining = totalSaleAmount.subtract(totalPaid);
             
             if (remaining.compareTo(BigDecimal.ZERO) > 0) {
-                sale.setStatus(SaleStatus.IN_PROCESS);
-            } else {
-                if (hasManufacturingItems) {
-                    sale.setStatus(SaleStatus.IN_PROCESS); 
+                // Si debe dinero
+                if (totalPaid.compareTo(BigDecimal.ZERO) > 0 && hasManufacturingItems) {
+                    // Dio anticipo y es lente -> Taller
+                    sale.setStatus(SaleStatus.IN_PROCESS);
                 } else {
-                    sale.setStatus(SaleStatus.COMPLETED);
+                    // No ha pagado nada o es accesorio -> Pendiente
+                    sale.setStatus(SaleStatus.PENDING);
+                }
+            } else {
+                // Pagado completo
+                if (hasManufacturingItems) {
+                    sale.setStatus(SaleStatus.IN_PROCESS); // Lente pagado va a taller
+                } else {
+                    sale.setStatus(SaleStatus.COMPLETED); // Accesorio pagado se entrega
                 }
             }
         }
 
         Sale savedSale = saleRepository.save(sale);
-
         return mapToResponse(savedSale);
     }
     
+    // --- MAPPER ---
     private SaleResponse mapToResponse(Sale sale) {
         SaleResponse response = new SaleResponse();
         response.setSaleId(sale.getId());
         response.setStatus(sale.getStatus().name());
         response.setDate(sale.getCreatedAt());
+        
         if (sale.getClient() != null) {
             response.setClientName(sale.getClient().getFullName());
         } else {
             response.setClientName("Cliente General");
         }
+        
         response.setTotalAmount(sale.getTotalAmount());
         response.setPaidAmount(sale.getPaidAmount());
         
@@ -171,11 +179,26 @@ public class SaleService {
              response.setRemainingBalance(sale.getTotalAmount().subtract(sale.getPaidAmount()));
         }
         
+        // --- MAPEO DE ITEMS PARA VER DETALLES ---
+        if (sale.getItems() != null) {
+            List<SaleItemResponse> itemResponses = sale.getItems().stream()
+                .map(item -> {
+                    SaleItemResponse ir = new SaleItemResponse();
+                    ir.setProductId(item.getProduct().getId());
+                    ir.setProductNameSnapshot(item.getProductNameSnapshot());
+                    ir.setQuantity(item.getQuantity());
+                    ir.setUnitPrice(item.getUnitPrice());
+                    ir.setSubtotal(item.getSubtotal());
+                    return ir;
+                })
+                .collect(Collectors.toList());
+            response.setItems(itemResponses);
+        }
+        
         return response;
     }
 
     public SaleResponse getSaleById(Long id) {
-        // CORREGIDO: Usamos getCurrentBranch()
         Long currentBranchId = TenantContext.getCurrentBranch();
         Sale sale = saleRepository.findByIdAndBranchId(id, currentBranchId)
                 .orElseThrow(() -> new RuntimeException("Venta no encontrada o no pertenece a esta sucursal"));
@@ -183,9 +206,28 @@ public class SaleService {
         return mapToResponse(sale);
     }
 
+    // --- ACTUALIZAR ESTADO (PATCH) ---
+    @Transactional
+    public SaleResponse updateStatus(Long saleId, String newStatusName) {
+        Long currentBranchId = TenantContext.getCurrentBranch();
+        
+        Sale sale = saleRepository.findByIdAndBranchId(saleId, currentBranchId)
+                .orElseThrow(() -> new RuntimeException("Venta no encontrada o sin permisos"));
+
+        try {
+            SaleStatus status = SaleStatus.valueOf(newStatusName);
+            sale.setStatus(status);
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("Estado inválido: " + newStatusName);
+        }
+
+        Sale savedSale = saleRepository.save(sale);
+        return mapToResponse(savedSale);
+    }
+
+    // --- AGREGAR PAGO ---
     @Transactional
     public SaleResponse addPayment(Long saleId, PaymentRequest paymentRequest) {
-        // CORREGIDO: Usamos getCurrentBranch()
         Long currentBranchId = TenantContext.getCurrentBranch();
         
         Sale sale = saleRepository.findByIdForUpdate(saleId)
@@ -195,13 +237,8 @@ public class SaleService {
              throw new RuntimeException("No tienes permiso para modificar ventas de otra sucursal");
         }
 
-        if (sale.getStatus() == SaleStatus.CANCELLED) {
-            throw new RuntimeException("No se pueden agregar pagos a una venta cancelada");
-        }
-        
-        if (sale.getStatus() == SaleStatus.QUOTATION) {
-            throw new RuntimeException("Una cotización debe convertirse en venta antes de pagar");
-        }
+        if (sale.getStatus() == SaleStatus.CANCELLED) throw new RuntimeException("No se pueden agregar pagos a una venta cancelada");
+        if (sale.getStatus() == SaleStatus.QUOTATION) throw new RuntimeException("Una cotización debe convertirse en venta antes de pagar");
 
         BigDecimal newBalance = sale.getRemainingBalance().subtract(paymentRequest.getAmount());
         
@@ -216,20 +253,31 @@ public class SaleService {
         payment.setReferenceCode(paymentRequest.getReferenceCode());
 
         sale.getPayments().add(payment);
-        
         sale.setPaidAmount(sale.getPaidAmount().add(paymentRequest.getAmount()));
 
+        // --- LÓGICA DE ESTADO AL PAGAR ---
         if (sale.getRemainingBalance().compareTo(BigDecimal.ZERO) == 0) {
-            
+            // Pagado al 100%
             boolean hasManufacturing = sale.getItems().stream()
                 .anyMatch(item -> item.getProduct().getType() == ProductType.LENS);
 
-            if (!hasManufacturing) {
+            if (hasManufacturing) {
+                // Si tiene lentes y estaba pendiente, pasa a taller
+                if (sale.getStatus() == SaleStatus.PENDING) {
+                    sale.setStatus(SaleStatus.IN_PROCESS);
+                }
+            } else {
+                // Solo accesorios -> Entregado
                 sale.setStatus(SaleStatus.COMPLETED);
             } 
-        }
-        else if (sale.getStatus() == SaleStatus.PENDING) {
-            sale.setStatus(SaleStatus.IN_PROCESS);
+        } else {
+            // Pago parcial
+            boolean hasManufacturing = sale.getItems().stream()
+                .anyMatch(item -> item.getProduct().getType() == ProductType.LENS);
+                
+            if (hasManufacturing && sale.getStatus() == SaleStatus.PENDING) {
+                sale.setStatus(SaleStatus.IN_PROCESS);
+            }
         }
 
         Sale savedSale = saleRepository.save(sale);
@@ -237,7 +285,6 @@ public class SaleService {
     }
     
     public List<Sale> getSalesByClient(Long clientId) {
-        // CORREGIDO: Usamos getCurrentBranch()
         Long currentBranchId = TenantContext.getCurrentBranch();
         return saleRepository.findByClientIdAndBranchIdOrderByCreatedAtDesc(clientId, currentBranchId);
     }

@@ -1,8 +1,12 @@
 package com.idar.optisaas.service;
 
+import com.idar.optisaas.dto.ProductRequest;
+import com.idar.optisaas.entity.Branch;
 import com.idar.optisaas.entity.Product;
+import com.idar.optisaas.repository.BranchRepository;
 import com.idar.optisaas.repository.ProductRepository;
 import com.idar.optisaas.security.TenantContext;
+import com.idar.optisaas.util.ProductType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,69 +16,96 @@ import java.util.List;
 @Service
 public class ProductService {
 
-    @Autowired private ProductRepository productRepository;
+    @Autowired
+    private ProductRepository productRepository;
+    
+    @Autowired
+    private BranchRepository branchRepository;
 
     public List<Product> getAllProducts() {
-        return productRepository.findAll();
+        Long branchId = TenantContext.getCurrentBranch();
+        return productRepository.findByBranchId(branchId);
     }
 
     @Transactional
-    public Product saveProduct(Product product) {
-        // --- VALIDACIÓN DE SKU DUPLICADO ---
-        // Si el producto tiene SKU, verificamos que no exista ya en OTRO producto
-        if (product.getSku() != null && !product.getSku().isBlank()) {
-            boolean exists = productRepository.existsBySku(product.getSku());
-            
-            // Si es nuevo (ID null) y existe -> ERROR
-            if (product.getId() == null && exists) {
-                throw new RuntimeException("El código SKU '" + product.getSku() + "' ya está registrado.");
-            }
-            
-            // Si es edición, verificamos que el SKU no pertenezca a OTRO ID diferente
-            if (product.getId() != null) {
-                Product existingWithSku = productRepository.findById(product.getId()).orElse(null);
-                // Si cambiamos el SKU y el nuevo ya está ocupado...
-                if (existingWithSku != null && !existingWithSku.getSku().equals(product.getSku()) && exists) {
-                    throw new RuntimeException("El código SKU '" + product.getSku() + "' ya pertenece a otro producto.");
-                }
-            }
-        }
+    public Product saveProduct(ProductRequest request) {
+        Long branchId = TenantContext.getCurrentBranch();
+        
+        Branch branch = branchRepository.findById(branchId)
+                .orElseThrow(() -> new RuntimeException("Sucursal no encontrada"));
 
-        // Lógica de Guardado (Igual que antes)
-        if (product.getId() == null) {
-            product.setBranchId(TenantContext.getCurrentBranch());
-            return productRepository.save(product);
-        } else {
-            Product existingProduct = productRepository.findById(product.getId())
+        Product product;
+
+        // 1. Crear o Editar
+        if (request.getId() != null) {
+            product = productRepository.findById(request.getId())
                     .orElseThrow(() -> new RuntimeException("Producto no encontrado"));
-
-            if (!existingProduct.getBranchId().equals(TenantContext.getCurrentBranch())) {
-                throw new RuntimeException("No tienes permiso para editar este producto");
-            }
-
-            // Actualizamos campos
-            existingProduct.setBrand(product.getBrand());
-            existingProduct.setModel(product.getModel());
-            existingProduct.setSku(product.getSku());
-            existingProduct.setColor(product.getColor());
-            existingProduct.setCategory(product.getCategory());
-            existingProduct.setDuration(product.getDuration());
-            existingProduct.setType(product.getType());
-            existingProduct.setBasePrice(product.getBasePrice());
-            existingProduct.setStockQuantity(product.getStockQuantity());
             
-            return productRepository.save(existingProduct);
+            // Seguridad: Verificar sucursal
+            // Nota: Como 'branch' es @ManyToOne insertable=false en tu entidad, 
+            // validamos usando el ID de la relación o branchId
+            // Si tu entidad Product tiene 'private Branch branch', úsalo:
+            if(!product.getBranch().getId().equals(branchId)){
+                 throw new RuntimeException("No puedes editar productos de otra sucursal");
+            }
+        } else {
+            product = new Product();
+            product.setBranch(branch); // Relación JPA
+            product.setBranchId(branchId); // BaseEntity ID
         }
+
+        // 2. Mapeo de campos
+        product.setBrand(request.getBrand() != null && !request.getBrand().isEmpty() ? request.getBrand() : "Genérico");
+        product.setModel(request.getModel());
+        product.setCategory(request.getCategory());
+        product.setColor(request.getColor());
+        product.setBasePrice(request.getBasePrice());
+        product.setStockQuantity(request.getStockQuantity() != null ? request.getStockQuantity() : 0);
+        
+        try {
+            product.setType(ProductType.valueOf(request.getType()));
+        } catch (Exception e) {
+            throw new RuntimeException("Tipo de producto inválido: " + request.getType());
+        }
+
+        // 3. LIMPIEZA DE DURACIÓN ("15 min" -> 15)
+        if (request.getDuration() != null && !request.getDuration().isEmpty()) {
+            String numericPart = request.getDuration().replaceAll("\\D+", ""); // Solo dígitos
+            if (!numericPart.isEmpty()) {
+                product.setDuration(Integer.parseInt(numericPart));
+            } else {
+                product.setDuration(null);
+            }
+        } else {
+            product.setDuration(null);
+        }
+
+        // 4. GENERACIÓN AUTOMÁTICA DE SKU (Si viene vacío)
+        if (request.getSku() == null || request.getSku().trim().isEmpty()) {
+            // Usamos milisegundos para algo pseudo-único rápido
+            String uniqueSuffix = String.valueOf(System.currentTimeMillis()).substring(7);
+            
+            if (product.getType() == ProductType.SERVICE) {
+                product.setSku("SERV-" + uniqueSuffix);
+            } else {
+                product.setSku("PROD-" + uniqueSuffix);
+            }
+        } else {
+            product.setSku(request.getSku());
+        }
+
+        return productRepository.save(product);
     }
 
-    @Transactional
     public void deleteProduct(Long id) {
+        Long branchId = TenantContext.getCurrentBranch();
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Producto no encontrado"));
-
-        if (!product.getBranchId().equals(TenantContext.getCurrentBranch())) {
-            throw new RuntimeException("No tienes permiso para eliminar este producto");
+        
+        if(!product.getBranch().getId().equals(branchId)){
+             throw new RuntimeException("No puedes eliminar productos de otra sucursal");
         }
+        
         productRepository.delete(product);
     }
 }

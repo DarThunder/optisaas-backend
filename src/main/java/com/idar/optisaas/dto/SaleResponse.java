@@ -17,5 +17,5 @@ public class SaleResponse {
     private BigDecimal paidAmount;
     private BigDecimal remainingBalance;
     
-    private List<SaleItemRequest> items;
+    private List<SaleItemResponse> items; 
 }

@@ -2,9 +2,11 @@ package com.idar.optisaas.controller;
 
 import com.idar.optisaas.service.SaleService;
 import com.idar.optisaas.dto.*;
-// Eliminamos import com.idar.optisaas.entity.Sale; si ya no se usa directamente en los retornos
+// Importamos Sale entidad solo si es necesario para el metodo legacy getSalesByClient
+import com.idar.optisaas.entity.Sale; 
 
 import java.util.List;
+import java.util.Map; // Importante para PATCH
 
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,7 +28,6 @@ public class SaleController {
         String sellerEmail = (String) auth.getPrincipal();
 
         SaleResponse response = saleService.createSale(request, sellerEmail);
-
         return ResponseEntity.ok(response);
     }
 
@@ -36,12 +37,10 @@ public class SaleController {
         return ResponseEntity.ok(response);
     }
 
-    // --- CORRECCIÓN AQUÍ: Cambiamos List<Sale> a List<SaleResponse> ---
     @GetMapping
     public ResponseEntity<List<SaleResponse>> getAllSales() {
         return ResponseEntity.ok(saleService.getAllSales());
     }
-    // ------------------------------------------------------------------
 
     @PostMapping("/{id}/payments")
     public ResponseEntity<SaleResponse> addPayment(
@@ -52,12 +51,24 @@ public class SaleController {
         return ResponseEntity.ok(response);
     }
 
-    // --- NOTA: Si getSalesByClient en el servicio devuelve List<Sale> (entidades)
-    // debes decidir si cambiar el servicio a DTOs o mantenerlo así.
-    // Si el servicio devuelve List<Sale>, este método debe quedar así:
+    // --- NUEVO: ENDPOINT PATCH PARA CAMBIAR ESTADO ---
+    @PatchMapping("/{id}/status")
+    public ResponseEntity<SaleResponse> updateStatus(
+            @PathVariable Long id, 
+            @RequestBody Map<String, String> payload) {
+        
+        String newStatus = payload.get("status");
+        if (newStatus == null) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        SaleResponse response = saleService.updateStatus(id, newStatus);
+        return ResponseEntity.ok(response);
+    }
+    // -------------------------------------------------
+
     @GetMapping("/by-client/{clientId}")
-    public ResponseEntity<List<com.idar.optisaas.entity.Sale>> getSalesByClient(@PathVariable Long clientId) {
+    public ResponseEntity<List<Sale>> getSalesByClient(@PathVariable Long clientId) {
         return ResponseEntity.ok(saleService.getSalesByClient(clientId));
     }
-    // Si prefieres DTOs, tendrías que mapearlo en el servicio primero.
 }
