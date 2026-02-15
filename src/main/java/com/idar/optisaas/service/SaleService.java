@@ -284,8 +284,15 @@ public class SaleService {
         return mapToResponse(savedSale);
     }
     
-    public List<Sale> getSalesByClient(Long clientId) {
+    public List<SaleResponse> getSalesByClient(Long clientId) {
         Long currentBranchId = TenantContext.getCurrentBranch();
-        return saleRepository.findByClientIdAndBranchIdOrderByCreatedAtDesc(clientId, currentBranchId);
+        
+        // Buscamos las entidades
+        List<Sale> sales = saleRepository.findByClientIdAndBranchIdOrderByCreatedAtDesc(clientId, currentBranchId);
+        
+        // Las convertimos a DTOs usando el mapper que ya tienes
+        return sales.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
 }

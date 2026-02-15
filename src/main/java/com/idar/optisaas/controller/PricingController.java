@@ -5,7 +5,8 @@ import com.idar.optisaas.dto.PriceCalculationRequest;
 import com.idar.optisaas.dto.PriceResponse;
 import com.idar.optisaas.entity.ClinicalRecord;
 import com.idar.optisaas.entity.LensBasePrice;
-import com.idar.optisaas.entity.PriceMatrix; // Asegúrate de importar la Entidad
+import com.idar.optisaas.entity.PriceMatrix;
+import com.idar.optisaas.entity.PriceRule; // Importante
 import com.idar.optisaas.repository.ClinicalRecordRepository;
 import com.idar.optisaas.repository.LensBasePriceRepository;
 import com.idar.optisaas.repository.PriceMatrixRepository;
@@ -13,9 +14,11 @@ import com.idar.optisaas.security.TenantContext;
 import com.idar.optisaas.service.OpticalCalculationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/pricing")
@@ -32,12 +35,15 @@ public class PricingController {
     
     @PostMapping("/calculate-lens")
     public ResponseEntity<PriceResponse> calculateLensPrice(@RequestBody PriceCalculationRequest request) {
+        if (request.getRxId() == null || request.getLensType() == null) {
+            return ResponseEntity.badRequest().build();
+        }
+
         ClinicalRecord rx = rxRepository.findById(request.getRxId())
-                .orElseThrow(() -> new RuntimeException("Receta no encontrada"));
+                .orElseThrow(() -> new RuntimeException("Receta no encontrada con ID: " + request.getRxId()));
 
         OpticalCalculationRequest calcReq = new OpticalCalculationRequest();
         
-        // Usamos la graduación más alta ("peor ojo") para determinar el precio
         Double sphere = getWorstValue(rx.getSphereRight(), rx.getSphereLeft());
         Double cylinder = getWorstValue(rx.getCylinderRight(), rx.getCylinderLeft());
 
@@ -58,6 +64,7 @@ public class PricingController {
     }
 
     @PutMapping("/base-prices")
+    @Transactional
     public ResponseEntity<?> updateBasePrices(@RequestBody List<LensBasePrice> updates) {
         Long branchId = TenantContext.getCurrentBranch();
         
@@ -70,7 +77,7 @@ public class PricingController {
                         .orElse(null);
             } else if (update.getDesignType() != null) {
                 target = lensBasePriceRepository.findByDesignTypeAndBranchId(update.getDesignType(), branchId)
-                        .orElse(null);
+                        .stream().findFirst().orElse(null);
             }
 
             if (target != null) {
@@ -94,21 +101,48 @@ public class PricingController {
 
     @GetMapping("/matrix")
     public ResponseEntity<PriceMatrix> getActiveMatrix() {
-        return ResponseEntity.of(priceMatrixRepository.findByBranchIdAndActiveTrue(TenantContext.getCurrentBranch()));
+        return priceMatrixRepository.findByBranchIdAndActiveTrue(TenantContext.getCurrentBranch())
+                .stream().findFirst()
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
-    @PostMapping("/matrix")
-    public ResponseEntity<PriceMatrix> saveMatrix(@RequestBody PriceMatrix matrix) {
+    @PutMapping("/matrix")
+    @Transactional
+    public ResponseEntity<PriceMatrix> updateMatrix(@RequestBody PriceMatrix matrixUpdate) {
         Long branchId = TenantContext.getCurrentBranch();
-        
-        priceMatrixRepository.findByBranchIdAndActiveTrue(branchId).ifPresent(existing -> {
-            matrix.setId(existing.getId()); 
-        });
 
-        matrix.setBranchId(branchId);
-        matrix.setActive(true);
-        
-        return ResponseEntity.ok(priceMatrixRepository.save(matrix));
+        // 1. Buscar Matriz Existente o Crear Nueva
+        PriceMatrix matrix = priceMatrixRepository.findByBranchIdAndActiveTrue(branchId)
+                .stream().findFirst()
+                .orElseGet(() -> {
+                    PriceMatrix m = new PriceMatrix();
+                    m.setBranchId(branchId);
+                    m.setName("Configuración General");
+                    m.setActive(true);
+                    return m;
+                });
+
+        // 2. Limpiar reglas anteriores para evitar duplicados/huérfanos
+        // (JPA con orphanRemoval=true se encargará de borrarlos de la BD)
+        matrix.getRules().clear();
+
+        // 3. Insertar nuevas reglas
+        if (matrixUpdate.getRules() != null) {
+            for (PriceRule ruleReq : matrixUpdate.getRules()) {
+                PriceRule newRule = new PriceRule();
+                newRule.setConditionType(ruleReq.getConditionType());
+                newRule.setMinVal(ruleReq.getMinVal());
+                newRule.setMaxVal(ruleReq.getMaxVal());
+                newRule.setAdjustment(ruleReq.getAdjustment());
+                newRule.setMatrix(matrix); // Vincular relación
+                
+                matrix.getRules().add(newRule);
+            }
+        }
+
+        PriceMatrix saved = priceMatrixRepository.save(matrix);
+        return ResponseEntity.ok(saved);
     }
 
     // =================================================================================

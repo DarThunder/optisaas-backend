@@ -68,7 +68,8 @@ public class SaleController {
     // -------------------------------------------------
 
     @GetMapping("/by-client/{clientId}")
-    public ResponseEntity<List<Sale>> getSalesByClient(@PathVariable Long clientId) {
+    public ResponseEntity<List<SaleResponse>> getSalesByClient(@PathVariable Long clientId) {
+        // Ahora devolvemos SaleResponse, que es seguro para JSON
         return ResponseEntity.ok(saleService.getSalesByClient(clientId));
     }
 }

@@ -1,8 +1,7 @@
 package com.idar.optisaas.entity;
 
 import java.util.Set;
-import com.fasterxml.jackson.annotation.JsonIgnore; // <--- IMPORTANTE
-
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
@@ -21,28 +20,25 @@ public class User {
     @Column(unique = true)
     private String username;
 
-    @JsonIgnore // <--- Ocultar contraseña por seguridad
+    @JsonIgnore
     private String password;
     
+    // --- CAMPO NUEVO PARA EL SAAS ---
+    @Column(length = 4)
+    private String quickPin; 
+    // -------------------------------
+
     private String fullName;
     private boolean active = true;
 
     @OneToMany(mappedBy = "user", fetch = FetchType.EAGER, cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<UserBranchRole> branchRoles;
 
-    public @Nullable String getPassword() {
-        return password;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public Set<UserBranchRole> getBranchRoles() {
-        return branchRoles;
-    }
-
-    public Long getId() {
-        return id;
-    }
+    // Getters manuales para asegurar que Lombok no falle
+    public @Nullable String getPassword() { return password; }
+    public String getEmail() { return email; }
+    public Set<UserBranchRole> getBranchRoles() { return branchRoles; }
+    public Long getId() { return id; }
+    public String getQuickPin() { return quickPin; }
+    public void setQuickPin(String pin) { this.quickPin = pin; }
 }

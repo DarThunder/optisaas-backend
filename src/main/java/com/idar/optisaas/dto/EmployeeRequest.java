@@ -15,6 +15,8 @@ public class EmployeeRequest {
     private String email;
     
     private String password;
+
+    private String quickPin;
     
     @NotNull(message = "El rol es obligatorio (MANAGER, SELLER, OPTOMETRIST)")
     private String role;

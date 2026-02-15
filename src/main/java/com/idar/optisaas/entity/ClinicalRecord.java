@@ -1,7 +1,7 @@
 package com.idar.optisaas.entity;
 
 import com.idar.optisaas.model.BaseEntity;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties; // <--- ESTA IMPORTACIÓN ES VITAL
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -13,21 +13,20 @@ import java.time.LocalDate;
 @EqualsAndHashCode(callSuper = true)
 public class ClinicalRecord extends BaseEntity {
 
-    // VINCULAMOS LA ANOTACIÓN PARA EVITAR EL ERROR DE JSON/SERIALIZACIÓN
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "client_id", nullable = false)
-    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"}) 
+    // CORRECCIÓN: Ignoramos propiedades de Hibernate y la relación circular con el cliente
+    @JsonIgnore
     private Client client;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "optometrist_id")
-    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+    @JsonIgnore
     private User optometrist;
 
     @Column(nullable = false)
     private LocalDate date;
 
-    // --- REFRACCIÓN (Rx) ---
     private Double sphereRight;
     private Double cylinderRight;
     private Integer axisRight;
@@ -41,7 +40,6 @@ public class ClinicalRecord extends BaseEntity {
     private Double pupillaryDistance;
     private Double height;
 
-    // --- ANAMNESIS ---
     private boolean diabetes;
     private boolean hypertension;
     private boolean familyHistory;
@@ -57,7 +55,6 @@ public class ClinicalRecord extends BaseEntity {
     private boolean usesContacts;
     private LocalDate lastRxDate;
 
-    // --- AGUDEZA VISUAL ---
     private String avScOd;
     private String avScOi;
     private String avScAo;
@@ -74,7 +71,6 @@ public class ClinicalRecord extends BaseEntity {
     @Column(length = 1000)
     private String notes;
     
-    // Métodos de compatibilidad
     public Double getAddRight() { return additionRight; }
     public Double getAddLeft() { return additionLeft; }
 }

@@ -17,6 +17,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByBranchId(Long branchId);
     // --------------------------------------------------
 
+    Optional<Product> findBySku(String sku);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Product p WHERE p.id = :id")
     Optional<Product> findByIdForUpdate(Long id);

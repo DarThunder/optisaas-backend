@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -22,7 +21,6 @@ public class DataSeeder implements CommandLineRunner {
     @Autowired private UserRepository userRepository;
     @Autowired private ClientRepository clientRepository;
     @Autowired private ProductRepository productRepository;
-    @Autowired private ClinicalRecordRepository clinicalRecordRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private PriceMatrixRepository priceMatrixRepository;
     @Autowired private LensBasePriceRepository lensBasePriceRepository;
@@ -31,25 +29,26 @@ public class DataSeeder implements CommandLineRunner {
     @Transactional
     public void run(String... args) throws Exception {
         if (branchRepository.count() > 0) {
-            System.out.println(">>> La base de datos ya tiene datos. Omitiendo seed.");
+            ensureSurfacingProductExists();
+            System.out.println(">>> El sistema ya tiene datos base. Omitiendo carga inicial completa.");
             return;
         }
 
-        System.out.println(">>> INICIANDO DATA SEEDER (GOD MODE)...");
+        System.out.println(">>> INICIANDO CARGA DE DATOS INICIALES (MOGAR)...");
 
         // 1. SUCURSAL
         Branch branch = new Branch();
-        branch.setName("Sucursal Central");
-        branch.setAddress("Calle Falsa 123");
-        branch.setSecurityPin(passwordEncoder.encode("1234"));
+        branch.setName("Óptica Mogar - Matriz");
+        branch.setAddress("Centro");
+        branch.setSecurityPin(passwordEncoder.encode("1234")); 
         Branch savedBranch = branchRepository.save(branch);
 
-        // 2. USUARIO
+        // 2. USUARIO ADMIN
         User user = new User();
-        user.setEmail("admin@opti.com");
+        user.setEmail("admin@mogar.com");
         user.setUsername("admin");
-        user.setFullName("Admin Supremo");
-        user.setPassword(passwordEncoder.encode("123456"));
+        user.setFullName("Administrador");
+        user.setPassword(passwordEncoder.encode("admin123"));
         user.setActive(true);
         
         UserBranchRole role = new UserBranchRole();
@@ -58,76 +57,76 @@ public class DataSeeder implements CommandLineRunner {
         role.setRole(Role.MANAGER);
         
         user.setBranchRoles(Set.of(role));
-        User savedUser = userRepository.save(user);
+        userRepository.save(user);
 
-        // 3. CLIENTE
+        // 3. CLIENTE DE PRUEBA
         Client client = new Client();
-        client.setFullName("Cliente Victima");
-        client.setEmail("victima@test.com");
+        client.setFullName("Cliente Mostrador");
+        client.setEmail("cliente@ejemplo.com");
         client.setPhone("555-0000");
         client.setBranchId(savedBranch.getId());
-        Client savedClient = clientRepository.save(client);
+        clientRepository.save(client);
 
-        // 4. HISTORIAL CLÍNICO
-        ClinicalRecord record = new ClinicalRecord();
-        record.setBranchId(savedBranch.getId());
-        record.setClient(savedClient);
-        record.setOptometrist(savedUser);
-        record.setDate(LocalDate.now());
-        record.setSphereRight(-1.50);
-        record.setCylinderRight(-0.50);
-        record.setAxisRight(180);
-        record.setSphereLeft(-1.75);
-        record.setCylinderLeft(-0.25);
-        record.setAxisLeft(175);
-        record.setAdditionRight(2.00);
-        record.setAdditionLeft(2.00);
-        record.setPupillaryDistance(63.0); 
-        record.setHeight(22.0); 
-        record.setNotes("Paciente de prueba generado automáticamente.");
-        clinicalRecordRepository.save(record);
+        // 4. CONFIGURACIÓN DE PRECIOS
+        createBasePrice(savedBranch.getId(), LensDesignType.MONOFOCAL, new BigDecimal("550.00"), "Monofocal Paquete 1");
+        createBasePrice(savedBranch.getId(), LensDesignType.BIFOCAL_FLAT_TOP, new BigDecimal("700.00"), "Bifocal Flat Top Blanco");
+        createBasePrice(savedBranch.getId(), LensDesignType.PROGRESSIVE, new BigDecimal("1300.00"), "Progresivo Blanco");
+        createBasePrice(savedBranch.getId(), LensDesignType.BIFOCAL_INVISIBLE, new BigDecimal("1000.00"), "Bifocal Invisible");
 
-        // 5. PRODUCTOS
-        createProduct(savedBranch.getId(), "LENS-001", "RayBan", "Aviator", ProductType.FRAME, "150.00", null);
-        createProduct(savedBranch.getId(), "TREAT-BLUE", "OptiLab", "BlueBlock Filter", ProductType.SERVICE, "500.00", "TRATAMIENTO");
-        createProduct(savedBranch.getId(), "MAT-POLY", "Generic", "Policarbonato", ProductType.LENS, "450.00", "MATERIAL");
+        createProduct(savedBranch.getId(), "TRAT-AR", "Mogar", "Antirreflejante (AR)", ProductType.ACCESSORY, "150.00", "Tratamiento");
+        createProduct(savedBranch.getId(), "TRAT-BLUE", "Mogar", "Filtro Blue Ray", ProductType.ACCESSORY, "350.00", "Tratamiento");
+        createProduct(savedBranch.getId(), "TRAT-FOTO-AR", "Mogar", "Fotocromático con AR", ProductType.ACCESSORY, "600.00", "Tratamiento");
+        createProduct(savedBranch.getId(), "ACC-GOTAS", "Renu", "Gotas Lubricantes", ProductType.ACCESSORY, "120.00", "General");   
 
-        // 6. REGLAS DE PRECIO (MATRIZ INTELIGENTE)
+        ensureSurfacingProductExists(savedBranch.getId());
+
+        // D. MATRIZ DE REGLAS (Corrección de branch_id)
         PriceMatrix matrix = new PriceMatrix();
-        matrix.setName("Lista General 2026");
+        matrix.setName("Reglas de Sobreprecio (Tallado)");
         matrix.setActive(true);
         matrix.setBranchId(savedBranch.getId());
 
         List<PriceRule> rules = new ArrayList<>();
 
-        // Regla A: Esferas Bajas (0 a 2.00) -> Precio Base incluido en el tipo de lente (o extra bajo)
-        rules.add(new PriceRule("SPHERE", 0.00, 2.00, BigDecimal.ZERO, null)); 
-        
-        // Regla B: Esferas Medias (2.25 a 4.00) -> +$100
-        rules.add(new PriceRule("SPHERE", 2.25, 4.00, new BigDecimal("100.00"), null));
+        // Regla 1
+        PriceRule r1 = new PriceRule();
+        r1.setConditionType("SPHERE"); r1.setMinVal(3.25); r1.setMaxVal(6.00); r1.setAdjustment(new BigDecimal("250.00"));
+        r1.setBranchId(savedBranch.getId()); // <--- ESTO FALTABA
+        r1.setMatrix(matrix);
+        rules.add(r1);
 
-        // Regla C: Esferas Altas (4.25 a 10.00) -> +$350
-        rules.add(new PriceRule("SPHERE", 4.25, 10.00, new BigDecimal("350.00"), null));
+        // Regla 2
+        PriceRule r2 = new PriceRule();
+        r2.setConditionType("SPHERE"); r2.setMinVal(6.25); r2.setMaxVal(20.00); r2.setAdjustment(new BigDecimal("500.00"));
+        r2.setBranchId(savedBranch.getId()); // <--- ESTO FALTABA
+        r2.setMatrix(matrix);
+        rules.add(r2);
 
-        // Regla D: Cilindro Alto (> 2.00) -> +$200
-        rules.add(new PriceRule("CYLINDER", 2.25, 6.00, new BigDecimal("200.00"), null));
-
-        // Regla E: Lente Positivo (Hipermetropía) -> +$150
-        rules.add(new PriceRule("POSITIVE", null, null, new BigDecimal("150.00"), null));
+        // Regla 3
+        PriceRule r3 = new PriceRule();
+        r3.setConditionType("CYLINDER"); r3.setMinVal(2.25); r3.setMaxVal(6.00); r3.setAdjustment(new BigDecimal("250.00"));
+        r3.setBranchId(savedBranch.getId()); // <--- ESTO FALTABA
+        r3.setMatrix(matrix);
+        rules.add(r3);
 
         matrix.setRules(rules);
         priceMatrixRepository.save(matrix);
 
-        // 7. PRECIOS BASE DE LENTES (CONFIGURACIÓN)
-        createBasePrice(savedBranch.getId(), LensDesignType.MONOFOCAL, new BigDecimal("500.00"), "Visión Sencilla");
-        createBasePrice(savedBranch.getId(), LensDesignType.BIFOCAL_FLAT_TOP, new BigDecimal("800.00"), "Bifocal con línea");
-        createBasePrice(savedBranch.getId(), LensDesignType.BIFOCAL_INVISIBLE, new BigDecimal("1200.00"), "Redondo Invisible (Blended)");
-        createBasePrice(savedBranch.getId(), LensDesignType.PROGRESSIVE, new BigDecimal("1800.00"), "Progresivo Multifocal");
-
-        System.out.println(">>> SEED COMPLETADO: Datos creados exitosamente.");
+        System.out.println(">>> SEED COMPLETADO.");
     }
 
-    // Helpers para limpiar el código
+    private void ensureSurfacingProductExists() {
+        if (productRepository.findBySku("SERV-TALLADO").isEmpty()) {
+            branchRepository.findAll().stream().findFirst().ifPresent(b -> ensureSurfacingProductExists(b.getId()));
+        }
+    }
+
+    private void ensureSurfacingProductExists(Long branchId) {
+        if (productRepository.findBySku("SERV-TALLADO").isEmpty()) {
+            createProduct(branchId, "SERV-TALLADO", "Laboratorio", "Servicio de Tallado", ProductType.SERVICE, "250.00", "Servicio");
+        }
+    }
+
     private void createBasePrice(Long branchId, LensDesignType type, BigDecimal price, String desc) {
         if (lensBasePriceRepository.findByDesignTypeAndBranchId(type, branchId).isEmpty()) {
             LensBasePrice lbp = new LensBasePrice();
@@ -140,15 +139,18 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void createProduct(Long branchId, String sku, String brand, String model, ProductType type, String price, String category) {
+        if (productRepository.findBySku(sku).isPresent()) return;
+
         Product p = new Product();
         p.setSku(sku);
         p.setBrand(brand);
         p.setModel(model);
         p.setType(type);
         p.setBasePrice(new BigDecimal(price));
-        p.setStockQuantity(10);
+        p.setStockQuantity(999);
         p.setBranchId(branchId);
         if (category != null) p.setCategory(category);
+        if (type == ProductType.SERVICE) p.setDuration(30); 
         productRepository.save(p);
     }
 }

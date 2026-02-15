@@ -16,6 +16,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Object> handleDatabaseError(DataIntegrityViolationException ex) {
+        System.err.println(">>> DATABASE ERROR CAPTURADO:"); // LOG VISIBLE
+        ex.printStackTrace(); // IMPRIMIR EN CONSOLA
+        
         Map<String, Object> body = Map.of(
             "timestamp", LocalDateTime.now(),
             "message", "Error de integridad de datos (posible duplicado o datos faltantes).",
@@ -26,9 +29,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Object> handleRuntimeException(RuntimeException ex) {
+        // --- ESTO ES LO QUE FALTABA ---
+        System.err.println(">>> RUNTIME EXCEPTION CAPTURADA (Causante del 400):");
+        ex.printStackTrace(); // ¡Aquí veremos el error real!
+        // ------------------------------
+
         Map<String, Object> body = Map.of(
             "timestamp", LocalDateTime.now(),
-            "message", ex.getMessage(),
+            "message", "Error interno: " + ex.getMessage(), // Enviamos el mensaje real al frontend
             "status", HttpStatus.BAD_REQUEST.value()
         );
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
@@ -44,11 +52,25 @@ public class GlobalExceptionHandler {
 
         Map<String, Object> body = Map.of(
             "timestamp", LocalDateTime.now(),
-            "message", "Validation failed",
+            "message", "Error de validación",
             "errors", errors,
             "status", HttpStatus.BAD_REQUEST.value()
         );
 
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+    
+    // Catch-all para cualquier otra cosa que no sea RuntimeException
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Object> handleGeneralException(Exception ex) {
+        System.err.println(">>> EXCEPTION GENERAL CAPTURADA:");
+        ex.printStackTrace();
+        
+        Map<String, Object> body = Map.of(
+            "timestamp", LocalDateTime.now(),
+            "message", "Error inesperado del servidor: " + ex.getMessage(),
+            "status", HttpStatus.INTERNAL_SERVER_ERROR.value()
+        );
+        return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }

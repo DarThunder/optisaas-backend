@@ -34,6 +34,7 @@ public class UserService {
         user.setUsername(request.getUsername());
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setQuickPin(request.getQuickPin()); // <--- Mapeo del PIN
         user.setActive(true);
 
         UserBranchRole role = new UserBranchRole();
@@ -52,6 +53,8 @@ public class UserService {
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
         
         user.setFullName(request.getFullName());
+        user.setQuickPin(request.getQuickPin()); // <--- Mapeo del PIN en actualización
+
         if (request.getUsername() != null) user.setUsername(request.getUsername());
         if (request.getEmail() != null) user.setEmail(request.getEmail());
         
@@ -59,6 +62,7 @@ public class UserService {
             user.setPassword(passwordEncoder.encode(request.getPassword()));
         }
 
+        // Actualizar rol en la sucursal específica
         user.getBranchRoles().stream()
             .filter(r -> r.getBranch().getId().equals(request.getBranchId()))
             .findFirst()
@@ -70,7 +74,7 @@ public class UserService {
     public void toggleUserStatus(Long id, boolean active) {
         User user = userRepository.findById(id).orElseThrow();
         user.setActive(active);
-        userRepository.save(user);
+        userRepository.save(user); 
     }
 
     public List<User> getEmployeesByBranch(Long branchId) {
@@ -80,7 +84,6 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
-    // NUEVO MÉTODO AGREGADO
     public List<User> getAllEmployees() {
         return userRepository.findAll();
     }

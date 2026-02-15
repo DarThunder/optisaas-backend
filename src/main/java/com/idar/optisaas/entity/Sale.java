@@ -2,6 +2,9 @@ package com.idar.optisaas.entity;
 
 import com.idar.optisaas.model.BaseEntity;
 import com.idar.optisaas.util.SaleStatus;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -13,21 +16,23 @@ import java.util.List;
 @Entity
 @Table(name = "sales")
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, exclude = {"items", "payments", "branch"})
 public class Sale extends BaseEntity {
 
-    // --- CORRECCIÓN: Marcamos como solo lectura para evitar conflicto con BaseEntity ---
-    @ManyToOne
+    // Cambiamos insertable/updatable a false para que no choque con branchId de BaseEntity
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "branch_id", insertable = false, updatable = false)
+    @JsonIgnore // Evita recursión en JSON
     private Branch branch;
-    // ----------------------------------------------------------------------------------
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "client_id", nullable = false)
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "branch"})
     private Client client;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "seller_id", nullable = false)
+    @JsonIgnoreProperties({"password", "branchRoles", "active"})
     private User seller;
 
     @Enumerated(EnumType.STRING)
@@ -36,15 +41,18 @@ public class Sale extends BaseEntity {
     private BigDecimal totalAmount = BigDecimal.ZERO;
     private BigDecimal paidAmount = BigDecimal.ZERO;
     
-    @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @JsonManagedReference
     private List<SaleItem> items = new ArrayList<>();
 
     @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
     private List<Payment> payments = new ArrayList<>();
     
     private boolean isParked = false; 
 
     public BigDecimal getRemainingBalance() {
-        return totalAmount.subtract(paidAmount);
+        if (totalAmount == null) return BigDecimal.ZERO;
+        return totalAmount.subtract(paidAmount != null ? paidAmount : BigDecimal.ZERO);
     }
 }
