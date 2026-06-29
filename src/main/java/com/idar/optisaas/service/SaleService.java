@@ -46,8 +46,8 @@ public class SaleService {
         Client client = clientRepository.findById(request.getClientId())
                 .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
         
-        User seller = userRepository.findByEmail(sellerEmail)
-                .orElseThrow(() -> new RuntimeException("Vendedor no encontrado"));
+        User seller = userRepository.findByEmailOrUsername(sellerEmail, sellerEmail)
+                .orElseThrow(() -> new RuntimeException("Vendedor no encontrado en BD. El sistema intentó buscar esto exactamente: [" + sellerEmail + "]"));
 
         Sale sale = new Sale();
         sale.setBranch(branch); 

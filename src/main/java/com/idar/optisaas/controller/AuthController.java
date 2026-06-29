@@ -11,6 +11,8 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 
 @RestController
 @RequestMapping("/api/auth")
@@ -71,5 +73,32 @@ public class AuthController {
             return jwtUtils.getUserNameFromJwtToken(jwt);
         }
         throw new RuntimeException("Token inválido o expirado. Vuelva a hacer login.");
+    }
+
+    @PostMapping("/hub-access")
+    public ResponseEntity<?> accessHub(@RequestBody Map<String, String> payload, HttpServletRequest request) {
+        try {
+            // Extraer quién está intentando entrar desde la cookie PRE_AUTH
+            String jwt = jwtUtils.getJwtFromCookies(request);
+            if (jwt == null || !jwtUtils.validateJwtToken(jwt)) {
+                return ResponseEntity.status(401).body(Map.of("error", "Sesión expirada"));
+            }
+            
+            String identifier = jwtUtils.getUserNameFromJwtToken(jwt);
+            String pin = payload.get("pin");
+
+            // Validar
+            AuthResponse response = authService.accessHub(identifier, pin);
+            
+            // Crear el token FULL. IMPORTANTE: branchId es 'null' porque es el Hub Global
+            ResponseCookie fullCookie = authService.createFullCookie(identifier, null, response.getRole());
+
+            return ResponseEntity.ok()
+                    .header(org.springframework.http.HttpHeaders.SET_COOKIE, fullCookie.toString())
+                    .body(response);
+                    
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 }

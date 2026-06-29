@@ -50,6 +50,7 @@ public class DataSeeder implements CommandLineRunner {
         user.setFullName("Administrador");
         user.setPassword(passwordEncoder.encode("admin123"));
         user.setActive(true);
+        user.setQuickPin("1234");
         
         UserBranchRole role = new UserBranchRole();
         role.setBranch(savedBranch);
