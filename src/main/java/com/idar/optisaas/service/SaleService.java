@@ -93,9 +93,22 @@ public class SaleService {
             item.setQuantity(itemReq.getQuantity());
             item.setUnitPrice(product.getBasePrice());
             
-            BigDecimal subtotal = product.getBasePrice().multiply(new BigDecimal(itemReq.getQuantity()));
+            // --- NUEVA LÓGICA DE PRECIOS ---
+            // 1. Definimos el precio por defecto (el del catálogo)
+            BigDecimal finalUnitPrice = product.getBasePrice();
+            
+            // 2. Si el Frontend nos envía un precio manual (calculado por el cotizador), lo usamos
+            if (itemReq.getManualPrice() != null && itemReq.getManualPrice().compareTo(BigDecimal.ZERO) >= 0) {
+                finalUnitPrice = itemReq.getManualPrice();
+            }
+            
+            item.setUnitPrice(finalUnitPrice);
+            
+            // 3. Calculamos el subtotal usando el precio final decidido
+            BigDecimal subtotal = finalUnitPrice.multiply(new BigDecimal(itemReq.getQuantity()));
             item.setSubtotal(subtotal);
             item.setProductNameSnapshot(product.getBrand() + " " + product.getModel());
+            // ---------------------------------
 
             if (itemReq.getClinicalRecordId() != null) {
                 ClinicalRecord record = clinicalRepository.findById(itemReq.getClinicalRecordId())

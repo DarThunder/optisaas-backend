@@ -32,37 +32,56 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-            // 1. IMPORTANTE: Integrar la configuración CORS aquí
+            // 1. Configuración de CORS y CSRF
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
+            
+            // 2. Gestión de sesión Stateless (para JWT)
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            
+            // 3. Reglas de Autorización
             .authorizeHttpRequests(auth -> auth
-                // 2. Permitir peticiones OPTIONS (Pre-flight) globales
+                // Permitir pre-flight requests (OPTIONS)
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 
+                // Endpoints públicos (Auth y Actuator)
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 
-                // Endpoints protegidos explícitamente
-                .requestMatchers("/api/users/**").authenticated() 
+                // REGLA CLAVE: Acceso a gestión de empleados
+                // .hasAnyRole busca automáticamente autoridades con prefijo "ROLE_"
+                // Permitimos a OWNER y MANAGER gestionar esta sección globalmente
+                .requestMatchers("/api/users/**").hasAnyRole("OWNER", "MANAGER")
                 
+                // Cualquier otra ruta requiere estar autenticado
                 .anyRequest().authenticated()
             );
 
+        // 4. Inyectar nuestro filtro de JWT antes del filtro de autenticación de Spring
         http.addFilterBefore(authTokenFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
-    // 3. Definición explícita de reglas CORS
+    /**
+     * Configuración de CORS centralizada para permitir la comunicación con el Frontend
+     * y el intercambio de Cookies (credentials).
+     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Permite el puerto de React
+        
+        // Orígenes permitidos (ajusta según tu entorno de desarrollo/producción)
         configuration.setAllowedOrigins(List.of("http://localhost:3000", "http://127.0.0.1:3000"));
+        
+        // Métodos permitidos
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
+        
+        // Cabeceras permitidas
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
-        configuration.setAllowCredentials(true); // Permite cookies/tokens
+        
+        // IMPORTANTE: Permitir el envío de la Cookie 'optisaas-auth-token'
+        configuration.setAllowCredentials(true); 
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

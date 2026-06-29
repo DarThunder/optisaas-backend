@@ -16,25 +16,33 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/users")
-// NOTA: Eliminamos @CrossOrigin aquí para usar la configuración global de SecurityConfig
 public class EmployeeController {
 
-    @Autowired private UserService userService;
+    @Autowired 
+    private UserService userService;
 
-    // --- SOLUCIÓN: Mapeo manual para evitar Error 400 (Recursión) ---
+    /**
+     * Obtiene la lista de empleados para el dueño o gerente.
+     * Si TenantContext.getCurrentBranch() es null, el sistema asume "Modo Global"
+     * y devuelve todos los empleados de todas las sucursales.
+     */
     @GetMapping("/by-owner")
     public ResponseEntity<?> getEmployeesByOwner() {
         try {
             Long currentBranchId = TenantContext.getCurrentBranch();
             List<User> users;
             
+            // LÓGICA DE GESTIÓN GLOBAL:
+            // Si el Admin entra directamente a la pestaña sin pasar por el selector,
+            // currentBranchId será null. En ese caso, traemos todo.
             if (currentBranchId == null) {
                 users = userService.getAllEmployees();
             } else {
+                // Si hay una sucursal activa, filtramos solo por esa sucursal
                 users = userService.getEmployeesByBranch(currentBranchId);
             }
 
-            // Transformamos la entidad a un Map limpio
+            // MAPEOMANUAL: Evita que Jackson entre en bucle infinito (User -> Role -> User)
             List<Map<String, Object>> response = users.stream().map(u -> {
                 Map<String, Object> map = new HashMap<>();
                 map.put("id", u.getId());
@@ -64,46 +72,37 @@ public class EmployeeController {
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            e.printStackTrace(); // Ver error en consola si falla
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            e.printStackTrace(); // Log para depuración en consola
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Error al obtener empleados: " + e.getMessage()));
         }
-    }
-
-    @PostMapping("/{id}/validate-pin")
-    public ResponseEntity<?> validatePin(@PathVariable Long id, @RequestBody Map<String, String> body) {
-        User user = userService.getAllEmployees().stream()
-                .filter(u -> u.getId().equals(id))
-                .findFirst()
-                .orElse(null);
-
-        if (user == null) return ResponseEntity.notFound().build();
-        
-        String inputPin = body.get("pin");
-        if (user.getQuickPin() != null && user.getQuickPin().equals(inputPin)) {
-             Map<String, Object> operator = new HashMap<>();
-             operator.put("id", user.getId());
-             operator.put("fullName", user.getFullName());
-             if (user.getBranchRoles() != null && !user.getBranchRoles().isEmpty()) {
-                 operator.put("role", user.getBranchRoles().iterator().next().getRole());
-             }
-             return ResponseEntity.ok(operator);
-        }
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("PIN Incorrecto");
     }
 
     @PostMapping("/create")
     public ResponseEntity<?> createEmployee(@RequestBody EmployeeRequest request) {
-        return ResponseEntity.ok(userService.createEmployee(request));
+        try {
+            return ResponseEntity.ok(userService.createEmployee(request));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<?> updateEmployee(@PathVariable Long id, @RequestBody EmployeeRequest request) {
-        return ResponseEntity.ok(userService.updateEmployee(id, request));
+        try {
+            return ResponseEntity.ok(userService.updateEmployee(id, request));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deactivateEmployee(@PathVariable Long id) {
-        userService.toggleUserStatus(id, false);
-        return ResponseEntity.ok("Empleado desactivado");
+        try {
+            userService.toggleUserStatus(id, false);
+            return ResponseEntity.ok(Map.of("message", "Empleado desactivado exitosamente"));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
     }
 }

@@ -85,6 +85,10 @@ public class JwtUtils {
         return parseClaims(token).getBody().get("branchId", Long.class);
     }
 
+    public String getRoleFromToken(String token) {
+    return parseClaims(token).getBody().get("role", String.class);
+    }
+
     public boolean isFullToken(String token) {
         String type = parseClaims(token).getBody().get("type", String.class);
         return "FULL".equals(type);
@@ -97,6 +101,7 @@ public class JwtUtils {
     private Key key() {
         return Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
     }
+
     
     private ResponseCookie buildCookie(String jwt) {
         return ResponseCookie.from(jwtCookie, jwt)

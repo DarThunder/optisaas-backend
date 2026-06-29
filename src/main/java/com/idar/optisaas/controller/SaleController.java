@@ -25,7 +25,7 @@ public class SaleController {
     @PostMapping
     public ResponseEntity<SaleResponse> createSale(@Valid @RequestBody SaleRequest request) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        String sellerEmail = (String) auth.getPrincipal();
+        String sellerEmail = auth.getName();
 
         SaleResponse response = saleService.createSale(request, sellerEmail);
         return ResponseEntity.ok(response);
