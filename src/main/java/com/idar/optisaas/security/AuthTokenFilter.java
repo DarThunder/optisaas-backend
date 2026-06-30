@@ -48,16 +48,22 @@ public class AuthTokenFilter extends OncePerRequestFilter {
                     List<SimpleGrantedAuthority> authorities = new ArrayList<>();
 
                     if (jwtUtils.isFullToken(jwt)) {
-                        // Modo sucursal específica
-                        Long branchId = jwtUtils.getBranchIdFromToken(jwt);
-                        TenantContext.setCurrentBranch(branchId);
-                        
-                        // Buscamos el rol específico en esa sucursal
-                        String role = user.getBranchRoles().stream()
+                    Long branchId = jwtUtils.getBranchIdFromToken(jwt);
+                    TenantContext.setCurrentBranch(branchId);
+
+                    String role;
+
+                    if (branchId == null) {
+                        role = jwtUtils.getRoleFromToken(jwt);
+                    } else {
+                        role = user.getBranchRoles().stream()
                             .filter(r -> r.getBranch().getId().equals(branchId))
                             .map(r -> r.getRole().name())
-                            .findFirst().orElse("USER");
-                        authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
+                            .findFirst()
+                            .orElse("USER");
+                    }
+
+                    authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
                     } else {
                         // MODO GLOBAL: Verificamos si es OWNER en alguna sucursal para darle el permiso global
                         boolean isOwner = user.getBranchRoles().stream()

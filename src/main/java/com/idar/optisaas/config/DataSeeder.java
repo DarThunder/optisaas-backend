@@ -29,6 +29,7 @@ public class DataSeeder implements CommandLineRunner {
     @Transactional
     public void run(String... args) throws Exception {
         if (branchRepository.count() > 0) {
+            ensureAdminUserIsOwner();
             ensureSurfacingProductExists();
             System.out.println(">>> El sistema ya tiene datos base. Omitiendo carga inicial completa.");
             return;
@@ -55,7 +56,7 @@ public class DataSeeder implements CommandLineRunner {
         UserBranchRole role = new UserBranchRole();
         role.setBranch(savedBranch);
         role.setUser(user);
-        role.setRole(Role.MANAGER);
+        role.setRole(Role.OWNER);
         
         user.setBranchRoles(Set.of(role));
         userRepository.save(user);
@@ -154,4 +155,18 @@ public class DataSeeder implements CommandLineRunner {
         if (type == ProductType.SERVICE) p.setDuration(30); 
         productRepository.save(p);
     }
+
+    private void ensureAdminUserIsOwner() {
+    userRepository.findByEmailOrUsername("admin@mogar.com", "admin")
+            .ifPresent(admin -> {
+                admin.setQuickPin("1234");
+
+                if (admin.getBranchRoles() != null) {
+                    admin.getBranchRoles().forEach(role -> role.setRole(Role.OWNER));
+                }
+
+                userRepository.save(admin);
+                System.out.println(">>> Admin reparado: rol OWNER y quickPin configurado.");
+            });
+}
 }
