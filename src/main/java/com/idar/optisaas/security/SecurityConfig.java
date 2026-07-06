@@ -52,6 +52,7 @@ public class SecurityConfig {
                 // .hasAnyRole busca automáticamente autoridades con prefijo "ROLE_"
                 // Permitimos a OWNER y MANAGER gestionar esta sección globalmente
                 .requestMatchers("/api/users/**").hasAnyRole("OWNER", "MANAGER")
+                .requestMatchers("/api/branches/**").hasRole("OWNER")
                 
                 // Cualquier otra ruta requiere estar autenticado
                 .anyRequest().authenticated()

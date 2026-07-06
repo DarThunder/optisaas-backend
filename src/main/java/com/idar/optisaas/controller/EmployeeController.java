@@ -95,6 +95,20 @@ public class EmployeeController {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
     }
+    @PostMapping("/{id}/validate-pin")
+    public ResponseEntity<?> validateEmployeePin(@PathVariable Long id, @RequestBody Map<String, String> payload) {
+        try {
+            User user = userService.validateEmployeePin(id, payload.get("pin"));
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", user.getId());
+            response.put("fullName", user.getFullName());
+            response.put("username", user.getUsername());
+            response.put("active", user.isActive());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", e.getMessage()));
+        }
+    }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deactivateEmployee(@PathVariable Long id) {

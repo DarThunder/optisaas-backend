@@ -70,6 +70,24 @@ public class UserService {
 
         return userRepository.save(user);
     }
+    public User validateEmployeePin(Long id, String pin) {
+        if (pin == null || pin.isBlank()) {
+            throw new RuntimeException("PIN requerido");
+        }
+
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Empleado no encontrado"));
+
+        if (!user.isActive()) {
+            throw new RuntimeException("Empleado inactivo");
+        }
+
+        if (user.getQuickPin() == null || !user.getQuickPin().equals(pin)) {
+            throw new RuntimeException("PIN de autorización incorrecto");
+        }
+
+        return user;
+    }
 
     public void toggleUserStatus(Long id, boolean active) {
         User user = userRepository.findById(id).orElseThrow();
