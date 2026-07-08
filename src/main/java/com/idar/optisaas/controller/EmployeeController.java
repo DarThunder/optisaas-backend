@@ -3,9 +3,12 @@ package com.idar.optisaas.controller;
 import com.idar.optisaas.dto.EmployeeRequest;
 import com.idar.optisaas.entity.User;
 import com.idar.optisaas.service.UserService;
-import com.idar.optisaas.security.TenantContext; 
+import com.idar.optisaas.security.TenantContext;
+import com.idar.optisaas.util.JwtUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,8 +21,11 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/users")
 public class EmployeeController {
 
-    @Autowired 
+    @Autowired
     private UserService userService;
+
+    @Autowired
+    private JwtUtils jwtUtils;
 
     /**
      * Obtiene la lista de empleados para el dueño o gerente.
@@ -95,16 +101,35 @@ public class EmployeeController {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
     }
+    // Cambiar de operador NO es solo cosmético: reemitimos el JWT a nombre del empleado
+    // seleccionado con SU rol real en esta sucursal, para que los permisos del backend
+    // (cortes, reportes, promociones, etc.) sigan a quien está realmente operando la caja,
+    // no a quien desbloqueó la terminal originalmente.
     @PostMapping("/{id}/validate-pin")
     public ResponseEntity<?> validateEmployeePin(@PathVariable Long id, @RequestBody Map<String, String> payload) {
         try {
             User user = userService.validateEmployeePin(id, payload.get("pin"));
+
+            Long branchId = TenantContext.getCurrentBranch();
+            String role = user.getBranchRoles().stream()
+                    .filter(r -> r.getBranch().getId().equals(branchId))
+                    .map(r -> r.getRole().name())
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Este empleado no tiene acceso a esta sucursal"));
+
+            String principal = (user.getEmail() != null && !user.getEmail().isBlank()) ? user.getEmail() : user.getUsername();
+            ResponseCookie cookie = jwtUtils.generateFullAccessCookie(principal, branchId, role);
+
             Map<String, Object> response = new HashMap<>();
             response.put("id", user.getId());
             response.put("fullName", user.getFullName());
             response.put("username", user.getUsername());
             response.put("active", user.isActive());
-            return ResponseEntity.ok(response);
+            response.put("role", role);
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .body(response);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", e.getMessage()));
         }

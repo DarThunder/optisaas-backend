@@ -1,12 +1,14 @@
 package com.idar.optisaas.repository;
 
 import com.idar.optisaas.entity.Sale;
+import com.idar.optisaas.util.SaleStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,4 +29,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
 
     // 3. Para getSalesByClient()
     List<Sale> findByClientIdAndBranchIdOrderByCreatedAtDesc(Long clientId, Long branchId);
+
+    // 4. Para expirar cotizaciones viejas (job programado)
+    List<Sale> findByStatusAndCreatedAtBefore(SaleStatus status, LocalDateTime cutoff);
 }

@@ -25,8 +25,9 @@ public class Sale extends BaseEntity {
     @JsonIgnore // Evita recursión en JSON
     private Branch branch;
 
+    // Nullable: una venta de mostrador (sin cliente registrado) no tiene client.
     @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "client_id", nullable = false)
+    @JoinColumn(name = "client_id", nullable = true)
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "branch"})
     private Client client;
 
@@ -40,7 +41,9 @@ public class Sale extends BaseEntity {
 
     private BigDecimal totalAmount = BigDecimal.ZERO;
     private BigDecimal paidAmount = BigDecimal.ZERO;
-    
+    private BigDecimal discountAmount = BigDecimal.ZERO;
+    private String discountName;
+
     @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @JsonManagedReference
     private List<SaleItem> items = new ArrayList<>();

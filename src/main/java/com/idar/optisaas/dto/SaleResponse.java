@@ -12,10 +12,13 @@ public class SaleResponse {
     private LocalDateTime date;
     
     private String clientName;
-    
+    private String clientPhone;
+
     private BigDecimal totalAmount;
     private BigDecimal paidAmount;
     private BigDecimal remainingBalance;
-    
+    private BigDecimal discountAmount;
+    private String discountName;
+
     private List<SaleItemResponse> items; 
 }

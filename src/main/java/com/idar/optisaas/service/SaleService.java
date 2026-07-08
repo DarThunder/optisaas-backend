@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,7 +25,8 @@ public class SaleService {
     @Autowired private ClientRepository clientRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private ClinicalRecordRepository clinicalRepository;
-    @Autowired private BranchRepository branchRepository; 
+    @Autowired private BranchRepository branchRepository;
+    @Autowired private UserBranchRoleRepository roleRepository;
 
     // --- OBTENER TODAS LAS VENTAS ---
     public List<SaleResponse> getAllSales() {
@@ -43,9 +45,24 @@ public class SaleService {
         Branch branch = branchRepository.findById(branchId)
                 .orElseThrow(() -> new RuntimeException("Sucursal no encontrada"));
 
-        Client client = clientRepository.findById(request.getClientId())
-                .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
-        
+        Client client = null;
+        if (request.getClientId() != null) {
+            client = clientRepository.findById(request.getClientId())
+                    .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+
+            // El cliente puede pertenecer a cualquier sucursal DEL MISMO DUEÑO (reconocimiento
+            // entre sucursales de la cadena), pero no a la cuenta de otro cliente de OptiSaaS.
+            Long branchOwnerId = roleRepository.findFirstByBranch_IdAndRole(branchId, Role.OWNER)
+                    .map(r -> r.getUser().getId())
+                    .orElseThrow(() -> new RuntimeException("La sucursal no tiene OWNER asignado"));
+
+            if (client.getOwnerId() == null || !branchOwnerId.equals(client.getOwnerId())) {
+                throw new RuntimeException("El cliente no pertenece a tu cuenta");
+            }
+        } else if (request.isQuotation()) {
+            throw new RuntimeException("Las cotizaciones requieren un cliente");
+        }
+
         User seller = userRepository.findByEmailOrUsername(sellerEmail, sellerEmail)
                 .orElseThrow(() -> new RuntimeException("Vendedor no encontrado en BD. El sistema intentó buscar esto exactamente: [" + sellerEmail + "]"));
 
@@ -66,23 +83,31 @@ public class SaleService {
         boolean hasManufacturingItems = false;
 
         for (SaleItemRequest itemReq : request.getItems()) {
-            Product product = productRepository.findByIdForUpdate(itemReq.getProductId())
-            .orElseThrow(() -> new RuntimeException("Producto no encontrado ID: " + itemReq.getProductId()));
+            Integer quantity = itemReq.getQuantity() != null ? itemReq.getQuantity() : 1;
+            Product product;
 
-            // Validar Sucursal
-            if (!product.getBranch().getId().equals(branchId)) {
-                throw new RuntimeException("El producto " + product.getModel() + " no pertenece a esta sucursal");
-            }
-
-            // Descontar Stock
-            if (product.getType() != ProductType.SERVICE && !request.isQuotation()) {
-                if (product.getStockQuantity() < itemReq.getQuantity()) {
-                    throw new RuntimeException("Stock insuficiente para: " + product.getModel());
+            if (itemReq.getProductId() == null) {
+                if (itemReq.getManualPrice() == null) {
+                    throw new RuntimeException("Los items manuales requieren precio manual");
                 }
-                product.setStockQuantity(product.getStockQuantity() - itemReq.getQuantity());
-                productRepository.save(product);
+                product = getManualSaleProduct(branch, branchId);
+            } else {
+                product = productRepository.findByIdForUpdate(itemReq.getProductId())
+                        .orElseThrow(() -> new RuntimeException("Producto no encontrado ID: " + itemReq.getProductId()));
+
+                if (!product.getBranch().getId().equals(branchId)) {
+                    throw new RuntimeException("El producto " + product.getModel() + " no pertenece a esta sucursal");
+                }
+
+                if (shouldManageStock(product) && !request.isQuotation()) {
+                    if (product.getStockQuantity() < quantity) {
+                        throw new RuntimeException("Stock insuficiente para: " + product.getModel());
+                    }
+                    product.setStockQuantity(product.getStockQuantity() - quantity);
+                    productRepository.save(product);
+                }
             }
-            
+
             if (product.getType() == ProductType.LENS) {
                 hasManufacturingItems = true;
             }
@@ -90,25 +115,17 @@ public class SaleService {
             SaleItem item = new SaleItem();
             item.setSale(sale);
             item.setProduct(product);
-            item.setQuantity(itemReq.getQuantity());
-            item.setUnitPrice(product.getBasePrice());
-            
-            // --- NUEVA LÓGICA DE PRECIOS ---
-            // 1. Definimos el precio por defecto (el del catálogo)
+            item.setQuantity(quantity);
+
             BigDecimal finalUnitPrice = product.getBasePrice();
-            
-            // 2. Si el Frontend nos envía un precio manual (calculado por el cotizador), lo usamos
             if (itemReq.getManualPrice() != null && itemReq.getManualPrice().compareTo(BigDecimal.ZERO) >= 0) {
                 finalUnitPrice = itemReq.getManualPrice();
             }
-            
+
             item.setUnitPrice(finalUnitPrice);
-            
-            // 3. Calculamos el subtotal usando el precio final decidido
-            BigDecimal subtotal = finalUnitPrice.multiply(new BigDecimal(itemReq.getQuantity()));
+            BigDecimal subtotal = finalUnitPrice.multiply(new BigDecimal(quantity));
             item.setSubtotal(subtotal);
-            item.setProductNameSnapshot(product.getBrand() + " " + product.getModel());
-            // ---------------------------------
+            item.setProductNameSnapshot(itemReq.getItemName() != null && !itemReq.getItemName().isBlank() ? itemReq.getItemName() : product.getBrand() + " " + product.getModel());
 
             if (itemReq.getClinicalRecordId() != null) {
                 ClinicalRecord record = clinicalRepository.findById(itemReq.getClinicalRecordId())
@@ -121,7 +138,25 @@ public class SaleService {
         }
 
         sale.setItems(itemsEntities);
-        sale.setTotalAmount(totalSaleAmount);
+
+        // --- APLICAR DESCUENTO/PROMOCIÓN ---
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        if (request.getDiscountValue() != null && request.getDiscountValue().compareTo(BigDecimal.ZERO) > 0) {
+            if ("PERCENTAGE".equalsIgnoreCase(request.getDiscountType())) {
+                discountAmount = totalSaleAmount.multiply(request.getDiscountValue())
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+            } else {
+                discountAmount = request.getDiscountValue();
+            }
+            if (discountAmount.compareTo(totalSaleAmount) > 0) {
+                discountAmount = totalSaleAmount;
+            }
+        }
+
+        BigDecimal finalTotal = totalSaleAmount.subtract(discountAmount);
+        sale.setTotalAmount(finalTotal);
+        sale.setDiscountAmount(discountAmount);
+        sale.setDiscountName(request.getDiscountName());
 
         // Procesar Pagos Iniciales
         BigDecimal totalPaid = BigDecimal.ZERO;
@@ -145,7 +180,7 @@ public class SaleService {
 
         // --- LÓGICA DE ESTADO INICIAL ---
         if (!request.isQuotation() && !request.isParkSale()) {
-            BigDecimal remaining = totalSaleAmount.subtract(totalPaid);
+            BigDecimal remaining = finalTotal.subtract(totalPaid);
             
             if (remaining.compareTo(BigDecimal.ZERO) > 0) {
                 // Si debe dinero
@@ -170,6 +205,25 @@ public class SaleService {
         return mapToResponse(savedSale);
     }
     
+    private boolean shouldManageStock(Product product) {
+        return product.getType() == ProductType.FRAME || product.getType() == ProductType.ACCESSORY;
+    }
+    private Product getManualSaleProduct(Branch branch, Long branchId) {
+        String sku = "MANUAL-SALE-" + branchId;
+        return productRepository.findBySku(sku).orElseGet(() -> {
+            Product product = new Product();
+            product.setBranchId(branchId);
+            product.setBranch(branch);
+            product.setSku(sku);
+            product.setBrand("Manual");
+            product.setModel("Venta comun");
+            product.setCategory("Venta rapida");
+            product.setType(ProductType.SERVICE);
+            product.setBasePrice(BigDecimal.ZERO);
+            product.setStockQuantity(0);
+            return productRepository.save(product);
+        });
+    }
     // --- MAPPER ---
     private SaleResponse mapToResponse(Sale sale) {
         SaleResponse response = new SaleResponse();
@@ -179,12 +233,15 @@ public class SaleService {
         
         if (sale.getClient() != null) {
             response.setClientName(sale.getClient().getFullName());
+            response.setClientPhone(sale.getClient().getPhone());
         } else {
             response.setClientName("Cliente General");
         }
         
         response.setTotalAmount(sale.getTotalAmount());
         response.setPaidAmount(sale.getPaidAmount());
+        response.setDiscountAmount(sale.getDiscountAmount());
+        response.setDiscountName(sale.getDiscountName());
         
         if (sale.getRemainingBalance() != null) {
              response.setRemainingBalance(sale.getRemainingBalance());
@@ -297,6 +354,19 @@ public class SaleService {
         return mapToResponse(savedSale);
     }
     
+    // --- EXPIRAR COTIZACIONES VIEJAS (JOB PROGRAMADO) ---
+    @Transactional
+    public int expireOldQuotations(int daysOld) {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(daysOld);
+        List<Sale> expired = saleRepository.findByStatusAndCreatedAtBefore(SaleStatus.QUOTATION, cutoff);
+
+        for (Sale sale : expired) {
+            sale.setStatus(SaleStatus.CANCELLED);
+        }
+        saleRepository.saveAll(expired);
+        return expired.size();
+    }
+
     public List<SaleResponse> getSalesByClient(Long clientId) {
         Long currentBranchId = TenantContext.getCurrentBranch();
         

@@ -48,12 +48,41 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 
+                // Cambio de operador (fichaje por PIN): cualquier autenticado puede intentarlo,
+                // el PIN de 4 dígitos del empleado destino es la propia validación de esta acción.
+                // Debe ir ANTES de la regla general de /api/users/** (que sí es solo Dueño/Gerente).
+                .requestMatchers(HttpMethod.POST, "/api/users/*/validate-pin").authenticated()
+
                 // REGLA CLAVE: Acceso a gestión de empleados
                 // .hasAnyRole busca automáticamente autoridades con prefijo "ROLE_"
                 // Permitimos a OWNER y MANAGER gestionar esta sección globalmente
                 .requestMatchers("/api/users/**").hasAnyRole("OWNER", "MANAGER")
                 .requestMatchers("/api/branches/**").hasRole("OWNER")
-                
+
+                // Cortes / movimientos de caja: solo Dueño y Gerente
+                .requestMatchers("/api/cash-movements/**").hasAnyRole("OWNER", "MANAGER")
+
+                // Inventario: cualquier rol autenticado puede consultar (lo necesita el POS),
+                // pero solo Dueño/Gerente pueden crear, editar o borrar productos.
+                .requestMatchers(HttpMethod.GET, "/api/products/**").authenticated()
+                .requestMatchers("/api/products/**").hasAnyRole("OWNER", "MANAGER")
+
+                // Precios: el cálculo y la consulta los usa cualquiera al vender;
+                // solo Dueño/Gerente configuran las tablas de precios.
+                .requestMatchers(HttpMethod.GET, "/api/pricing/**").authenticated()
+                .requestMatchers(HttpMethod.POST, "/api/pricing/calculate-lens").authenticated()
+                .requestMatchers("/api/pricing/**").hasAnyRole("OWNER", "MANAGER")
+
+                // Promociones: cualquiera puede verlas/aplicarlas en el POS,
+                // solo Dueño/Gerente las crean, editan o eliminan.
+                .requestMatchers(HttpMethod.GET, "/api/promotions/**").authenticated()
+                .requestMatchers("/api/promotions/**").hasAnyRole("OWNER", "MANAGER")
+
+                // Expedientes clínicos: cualquiera puede consultarlos (Vendedor necesita ver la Rx),
+                // pero solo Dueño/Gerente/Optometrista pueden crearlos, editarlos o borrarlos.
+                .requestMatchers(HttpMethod.GET, "/api/clinical-records/**").authenticated()
+                .requestMatchers("/api/clinical-records/**").hasAnyRole("OWNER", "MANAGER", "OPTOMETRIST")
+
                 // Cualquier otra ruta requiere estar autenticado
                 .anyRequest().authenticated()
             );
