@@ -59,8 +59,16 @@ public class SecurityConfig {
                 .requestMatchers("/api/users/**").hasAnyRole("OWNER", "MANAGER")
                 .requestMatchers("/api/branches/**").hasRole("OWNER")
 
-                // Cortes / movimientos de caja: solo Dueño y Gerente
+                // Cortes / movimientos de caja y sesiones de caja: solo Dueño y Gerente
                 .requestMatchers("/api/cash-movements/**").hasAnyRole("OWNER", "MANAGER")
+                .requestMatchers("/api/cash-sessions/**").hasAnyRole("OWNER", "MANAGER")
+
+                // Reportes (ventas, cuentas por cobrar, valuación): solo Dueño y Gerente
+                .requestMatchers("/api/reports/**").hasAnyRole("OWNER", "MANAGER")
+
+                // Configuración: leerla la necesita cualquiera (para imprimir el ticket),
+                // pero editarla es solo del Dueño y el Gerente.
+                .requestMatchers(HttpMethod.PUT, "/api/settings").hasAnyRole("OWNER", "MANAGER")
 
                 // Inventario: cualquier rol autenticado puede consultar (lo necesita el POS),
                 // pero solo Dueño/Gerente pueden crear, editar o borrar productos.

@@ -40,6 +40,11 @@ public class Product extends BaseEntity {
     @Column(nullable = false)
     private BigDecimal basePrice;
 
+    // Costo de adquisición del producto (para valuación de inventario y margen de ganancia).
+    // columnDefinition default 0: los productos EXISTENTES quedan en 0 hasta que se editen.
+    @Column(columnDefinition = "numeric default 0")
+    private BigDecimal cost = BigDecimal.ZERO;
+
     private Integer stockQuantity = 0;
     
     private Integer duration; 

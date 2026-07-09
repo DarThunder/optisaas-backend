@@ -14,6 +14,7 @@ public class ProductRequest {
     private String type; // FRAME, LENS, SERVICE, ACCESSORY
     
     private BigDecimal basePrice;
+    private BigDecimal cost;
     private Integer stockQuantity;
     private String color;
     

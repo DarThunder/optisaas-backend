@@ -3,6 +3,7 @@ package com.idar.optisaas.controller;
 import com.idar.optisaas.dto.*;
 import com.idar.optisaas.util.JwtUtils;
 import com.idar.optisaas.service.AuthService;
+import com.idar.optisaas.service.UserService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,23 @@ public class AuthController {
 
     @Autowired private AuthService authService;
     @Autowired private JwtUtils jwtUtils;
+    @Autowired private UserService userService;
+
+    // Activación de cuenta (primer ingreso): el empleado define su propia contraseña
+    // y PIN con el código de un solo uso. Público: aún no tiene credenciales para login.
+    @PostMapping("/activate")
+    public ResponseEntity<?> activate(@RequestBody ActivationRequest request) {
+        try {
+            userService.activateAccount(
+                    request.getIdentifier(),
+                    request.getActivationCode(),
+                    request.getNewPassword(),
+                    request.getNewPin());
+            return ResponseEntity.ok(Map.of("message", "Cuenta activada. Ya puedes iniciar sesión."));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {

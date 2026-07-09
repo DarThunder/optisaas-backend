@@ -32,4 +32,7 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
 
     // 4. Para expirar cotizaciones viejas (job programado)
     List<Sale> findByStatusAndCreatedAtBefore(SaleStatus status, LocalDateTime cutoff);
+
+    // 5. Para reportes por periodo (Reporte de Ventas)
+    List<Sale> findByBranchIdAndCreatedAtBetween(Long branchId, LocalDateTime start, LocalDateTime end);
 }

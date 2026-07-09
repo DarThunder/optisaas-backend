@@ -33,6 +33,11 @@ public class AuthService {
         User user = userRepository.findByEmailOrUsername(request.getIdentifier(), request.getIdentifier())
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado (Email o ID inválido)"));
 
+        // Cuenta creada pero aún sin credenciales propias: debe activarse primero.
+        if (!user.isCredentialsSet() || user.getPassword() == null) {
+            throw new RuntimeException("Cuenta no activada. Usa 'Primer ingreso' con tu código de activación.");
+        }
+
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new RuntimeException("Credenciales inválidas");
         }

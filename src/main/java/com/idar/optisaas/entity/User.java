@@ -24,12 +24,30 @@ public class User {
     private String password;
     
     // --- CAMPO NUEVO PARA EL SAAS ---
+    // @JsonIgnore: el PIN de autorización nunca debe salir en ninguna respuesta
+    // (se valida siempre contra el backend, jamás se compara en el cliente).
+    @JsonIgnore
     @Column(length = 4)
-    private String quickPin; 
+    private String quickPin;
     // -------------------------------
 
     private String fullName;
     private boolean active = true;
+
+    // --- AUTO-SERVICIO DE CREDENCIALES ---
+    // Un empleado nuevo se crea SIN contraseña ni PIN; define ambos él mismo en su
+    // primer ingreso usando un código de activación de un solo uso. Nadie más los conoce.
+    // columnDefinition "default true": las filas EXISTENTES (admin y empleados ya activos)
+    // quedan como activadas; los registros nuevos que inserta la app llegan con false.
+    @Column(columnDefinition = "boolean default true")
+    private boolean credentialsSet = false;
+
+    @JsonIgnore
+    @Column(length = 10)
+    private String activationCode;
+
+    @JsonIgnore
+    private java.time.LocalDateTime activationCodeExpiresAt;
 
     @OneToMany(mappedBy = "user", fetch = FetchType.EAGER, cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<UserBranchRole> branchRoles;

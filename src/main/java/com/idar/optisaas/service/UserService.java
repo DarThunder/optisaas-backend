@@ -3,12 +3,15 @@ package com.idar.optisaas.service;
 import com.idar.optisaas.dto.EmployeeRequest;
 import com.idar.optisaas.entity.*;
 import com.idar.optisaas.repository.*;
+import com.idar.optisaas.security.TenantContext;
 import com.idar.optisaas.util.Role;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -18,58 +21,189 @@ public class UserService {
 
     @Autowired private UserRepository userRepository;
     @Autowired private BranchRepository branchRepository;
+    @Autowired private UserBranchRoleRepository roleRepository;
     @Autowired private PasswordEncoder passwordEncoder;
 
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final int ACTIVATION_CODE_VALID_DAYS = 7;
+
+    // =======================================================================
+    // CREAR EMPLEADO
+    // callerUsername / callerRole identifican a quién hace la petición, para
+    // aplicar el techo de rol y el aislamiento por sucursal/cuenta.
+    // =======================================================================
     @Transactional
-    public User createEmployee(EmployeeRequest request) {
+    public User createEmployee(EmployeeRequest request, String callerUsername, String callerRole) {
         if (userRepository.findByEmailOrUsername(request.getUsername(), request.getEmail()).isPresent()) {
             throw new RuntimeException("El usuario ya existe (username o email duplicado)");
         }
 
-        Branch branch = branchRepository.findById(request.getBranchId())
+        Role newRole = parseRole(request.getRole());
+        Long targetBranchId = request.getBranchId();
+        if (targetBranchId == null) {
+            throw new RuntimeException("La sucursal es obligatoria");
+        }
+
+        // Nadie crea cuentas de Dueño desde aquí (se provisionan al dar de alta la cuenta).
+        if (newRole == Role.OWNER) {
+            throw new RuntimeException("No se pueden crear cuentas de Dueño");
+        }
+
+        User caller = getCaller(callerUsername);
+
+        if ("MANAGER".equals(callerRole)) {
+            Long currentBranch = TenantContext.getCurrentBranch();
+            if (currentBranch == null || !currentBranch.equals(targetBranchId)) {
+                throw new RuntimeException("Solo puedes crear empleados en tu sucursal");
+            }
+            if (newRole == Role.MANAGER) {
+                throw new RuntimeException("Un Gerente no puede crear otros Gerentes");
+            }
+            // Aquí newRole solo puede ser SELLER u OPTOMETRIST.
+        } else {
+            // OWNER: solo en sucursales que le pertenecen.
+            if (!caller.getId().equals(resolveOwnerIdForBranch(targetBranchId))) {
+                throw new RuntimeException("Esa sucursal no pertenece a tu cuenta");
+            }
+        }
+
+        Branch branch = branchRepository.findById(targetBranchId)
                 .orElseThrow(() -> new RuntimeException("Sucursal no encontrada"));
 
         User user = new User();
         user.setFullName(request.getFullName());
         user.setUsername(request.getUsername());
         user.setEmail(request.getEmail());
-        user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setQuickPin(request.getQuickPin()); // <--- Mapeo del PIN
         user.setActive(true);
+
+        // El empleado define su propia contraseña y PIN al activar la cuenta.
+        // Quien lo crea NUNCA fija ni conoce esas credenciales.
+        user.setCredentialsSet(false);
+        user.setActivationCode(generateActivationCode());
+        user.setActivationCodeExpiresAt(LocalDateTime.now().plusDays(ACTIVATION_CODE_VALID_DAYS));
 
         UserBranchRole role = new UserBranchRole();
         role.setUser(user);
         role.setBranch(branch);
-        role.setRole(Role.valueOf(request.getRole()));
+        role.setRole(newRole);
 
         user.setBranchRoles(Set.of(role));
-        
+
         return userRepository.save(user);
     }
 
+    // =======================================================================
+    // RESETEAR ACCESO (genera un nuevo código de activación; el empleado vuelve
+    // a definir su contraseña y PIN). Quien resetea NO conoce las nuevas claves.
+    // =======================================================================
     @Transactional
-    public User updateEmployee(Long id, EmployeeRequest request) {
-        User user = userRepository.findById(id)
+    public User resetCredentials(Long id, String callerUsername, String callerRole) {
+        User caller = getCaller(callerUsername);
+        User target = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
-        
-        user.setFullName(request.getFullName());
-        user.setQuickPin(request.getQuickPin()); // <--- Mapeo del PIN en actualización
 
-        if (request.getUsername() != null) user.setUsername(request.getUsername());
-        if (request.getEmail() != null) user.setEmail(request.getEmail());
-        
-        if (request.getPassword() != null && !request.getPassword().isBlank()) {
-            user.setPassword(passwordEncoder.encode(request.getPassword()));
+        assertCanManageTarget(caller, callerRole, target, "resetear el acceso de");
+
+        target.setCredentialsSet(false);
+        target.setPassword(null);
+        target.setQuickPin(null);
+        target.setActivationCode(generateActivationCode());
+        target.setActivationCodeExpiresAt(LocalDateTime.now().plusDays(ACTIVATION_CODE_VALID_DAYS));
+
+        return userRepository.save(target);
+    }
+
+    // =======================================================================
+    // ACTIVAR CUENTA (auto-servicio): el empleado define su contraseña y PIN
+    // usando el código de un solo uso. Es un flujo público (aún no puede iniciar sesión).
+    // =======================================================================
+    @Transactional
+    public void activateAccount(String identifier, String code, String newPassword, String newPin) {
+        User user = userRepository.findByEmailOrUsername(identifier, identifier)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+
+        if (user.isCredentialsSet()) {
+            throw new RuntimeException("Esta cuenta ya fue activada. Inicia sesión normalmente.");
+        }
+        if (user.getActivationCode() == null || !user.getActivationCode().equals(code)) {
+            throw new RuntimeException("Código de activación inválido");
+        }
+        if (user.getActivationCodeExpiresAt() != null && user.getActivationCodeExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("El código de activación expiró. Pide uno nuevo a tu administrador.");
+        }
+        if (newPassword == null || newPassword.length() < 4) {
+            throw new RuntimeException("La contraseña debe tener al menos 4 caracteres");
+        }
+        if (newPin == null || !newPin.matches("\\d{4}")) {
+            throw new RuntimeException("El PIN debe ser de 4 dígitos");
         }
 
-        // Actualizar rol en la sucursal específica
-        user.getBranchRoles().stream()
-            .filter(r -> r.getBranch().getId().equals(request.getBranchId()))
-            .findFirst()
-            .ifPresent(r -> r.setRole(Role.valueOf(request.getRole())));
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setQuickPin(newPin);
+        user.setCredentialsSet(true);
+        user.setActivationCode(null);
+        user.setActivationCodeExpiresAt(null);
 
-        return userRepository.save(user);
+        userRepository.save(user);
     }
+
+    // =======================================================================
+    // ACTUALIZAR EMPLEADO
+    // =======================================================================
+    @Transactional
+    public User updateEmployee(Long id, EmployeeRequest request, String callerUsername, String callerRole) {
+        User caller = getCaller(callerUsername);
+        User target = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+
+        Role newRole = parseRole(request.getRole());
+        if (newRole == Role.OWNER) {
+            throw new RuntimeException("No se puede asignar el rol de Dueño");
+        }
+
+        Long branchToUpdate;
+
+        if ("MANAGER".equals(callerRole)) {
+            Long currentBranch = TenantContext.getCurrentBranch();
+            UserBranchRole targetRole = target.getBranchRoles().stream()
+                    .filter(r -> r.getBranch().getId().equals(currentBranch))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Este empleado no pertenece a tu sucursal"));
+
+            if (targetRole.getRole() == Role.OWNER || targetRole.getRole() == Role.MANAGER) {
+                throw new RuntimeException("No puedes editar a un Gerente o Dueño");
+            }
+            if (newRole == Role.MANAGER) {
+                throw new RuntimeException("Un Gerente no puede ascender empleados a Gerente");
+            }
+            branchToUpdate = currentBranch;
+        } else {
+            // OWNER: el empleado debe pertenecer a una sucursal de su cuenta.
+            boolean sameOwner = target.getBranchRoles().stream()
+                    .anyMatch(r -> caller.getId().equals(resolveOwnerIdForBranch(r.getBranch().getId())));
+            if (!sameOwner) {
+                throw new RuntimeException("Este empleado no pertenece a tu cuenta");
+            }
+            branchToUpdate = request.getBranchId();
+        }
+
+        target.setFullName(request.getFullName());
+
+        if (request.getUsername() != null) target.setUsername(request.getUsername());
+        if (request.getEmail() != null) target.setEmail(request.getEmail());
+
+        // Nota: la contraseña y el PIN NO se tocan aquí. Solo el propio empleado los
+        // define (al activar su cuenta); para renovarlos se usa resetCredentials().
+
+        // Actualizar el rol en la sucursal correspondiente.
+        target.getBranchRoles().stream()
+                .filter(r -> r.getBranch().getId().equals(branchToUpdate))
+                .findFirst()
+                .ifPresent(r -> r.setRole(newRole));
+
+        return userRepository.save(target);
+    }
+
     public User validateEmployeePin(Long id, String pin) {
         if (pin == null || pin.isBlank()) {
             throw new RuntimeException("PIN requerido");
@@ -89,10 +223,19 @@ public class UserService {
         return user;
     }
 
-    public void toggleUserStatus(Long id, boolean active) {
-        User user = userRepository.findById(id).orElseThrow();
-        user.setActive(active);
-        userRepository.save(user); 
+    // =======================================================================
+    // DESACTIVAR EMPLEADO
+    // =======================================================================
+    @Transactional
+    public void deactivateEmployee(Long id, String callerUsername, String callerRole) {
+        User caller = getCaller(callerUsername);
+        User target = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+
+        assertCanManageTarget(caller, callerRole, target, "desactivar");
+
+        target.setActive(false);
+        userRepository.save(target);
     }
 
     public List<User> getEmployeesByBranch(Long branchId) {
@@ -102,7 +245,80 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
-    public List<User> getAllEmployees() {
-        return userRepository.findAll();
+    // Lista global para el Dueño, acotada SOLO a los empleados de sus propias
+    // sucursales (antes devolvía todos los usuarios de toda la plataforma).
+    public List<User> getEmployeesForOwner(String ownerUsername) {
+        User owner = getCaller(ownerUsername);
+        Set<Long> ownedBranchIds = roleRepository.findByUser_IdAndRole(owner.getId(), Role.OWNER).stream()
+                .map(r -> r.getBranch().getId())
+                .collect(Collectors.toSet());
+
+        if (ownedBranchIds.isEmpty()) {
+            return List.of();
+        }
+
+        return userRepository.findAll().stream()
+                .filter(u -> u.getBranchRoles().stream()
+                        .anyMatch(r -> ownedBranchIds.contains(r.getBranch().getId())))
+                .collect(Collectors.toList());
+    }
+
+    // ------------------------- Helpers -------------------------
+
+    private User getCaller(String username) {
+        return userRepository.findByEmailOrUsername(username, username)
+                .orElseThrow(() -> new RuntimeException("Usuario autenticado no encontrado"));
+    }
+
+    private Long resolveOwnerIdForBranch(Long branchId) {
+        return roleRepository.findFirstByBranch_IdAndRole(branchId, Role.OWNER)
+                .map(r -> r.getUser().getId())
+                .orElseThrow(() -> new RuntimeException("La sucursal no tiene Dueño asignado"));
+    }
+
+    private Role parseRole(String role) {
+        if (role == null) throw new RuntimeException("El rol es obligatorio");
+        try {
+            return Role.valueOf(role);
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("Rol inválido: " + role);
+        }
+    }
+
+    // Valida que 'caller' pueda administrar a 'target' (desactivar / resetear acceso):
+    // - Gerente: solo Vendedores/Optometristas de SU sucursal.
+    // - Dueño: cualquier empleado (no Dueño) de sus propias sucursales.
+    // - Nadie sobre su propia cuenta.
+    private void assertCanManageTarget(User caller, String callerRole, User target, String actionPhrase) {
+        if (caller.getId().equals(target.getId())) {
+            throw new RuntimeException("No puedes " + actionPhrase + " tu propia cuenta");
+        }
+
+        if ("MANAGER".equals(callerRole)) {
+            Long currentBranch = TenantContext.getCurrentBranch();
+            UserBranchRole targetRole = target.getBranchRoles().stream()
+                    .filter(r -> r.getBranch().getId().equals(currentBranch))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Este empleado no pertenece a tu sucursal"));
+            if (targetRole.getRole() == Role.OWNER || targetRole.getRole() == Role.MANAGER) {
+                throw new RuntimeException("No puedes " + actionPhrase + " a un Gerente o Dueño");
+            }
+        } else {
+            boolean sameOwner = target.getBranchRoles().stream()
+                    .anyMatch(r -> caller.getId().equals(resolveOwnerIdForBranch(r.getBranch().getId())));
+            if (!sameOwner) {
+                throw new RuntimeException("Este empleado no pertenece a tu cuenta");
+            }
+            boolean targetIsOwner = target.getBranchRoles().stream()
+                    .anyMatch(r -> r.getRole() == Role.OWNER);
+            if (targetIsOwner) {
+                throw new RuntimeException("No puedes " + actionPhrase + " una cuenta de Dueño");
+            }
+        }
+    }
+
+    // Código de activación de un solo uso: 6 dígitos, fácil de dictar al empleado.
+    private String generateActivationCode() {
+        return String.format("%06d", RANDOM.nextInt(1_000_000));
     }
 }

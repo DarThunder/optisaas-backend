@@ -60,6 +60,7 @@ public class ProductService {
         product.setCategory(request.getCategory());
         product.setColor(request.getColor());
         product.setBasePrice(request.getBasePrice());
+        product.setCost(request.getCost() != null ? request.getCost() : java.math.BigDecimal.ZERO);
         product.setStockQuantity(request.getStockQuantity() != null ? request.getStockQuantity() : 0);
         
         try {
