@@ -39,6 +39,28 @@ public class AuthController {
         }
     }
 
+    // Verificación de sesión: el front la llama al cargar para restaurar la sesión
+    // sin volver a iniciar sesión. Solo lee y valida la cookie httpOnly ya existente.
+    @GetMapping("/me")
+    public ResponseEntity<?> me(HttpServletRequest request) {
+        String jwt = jwtUtils.getJwtFromCookies(request);
+        if (jwt == null || !jwtUtils.validateJwtToken(jwt) || !jwtUtils.isFullToken(jwt)) {
+            return ResponseEntity.status(401).body(Map.of("authenticated", false));
+        }
+        Long branchId = jwtUtils.getBranchIdFromToken(jwt);
+        if (branchId == null) {
+            // Token global (hub) sin sucursal elegida: no es una sesión dentro de la app.
+            return ResponseEntity.status(401).body(Map.of("authenticated", false));
+        }
+
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("authenticated", true);
+        body.put("username", jwtUtils.getUserNameFromJwtToken(jwt));
+        body.put("role", jwtUtils.getRoleFromToken(jwt));
+        body.put("branchId", branchId);
+        return ResponseEntity.ok(body);
+    }
+
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
         try {

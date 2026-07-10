@@ -63,7 +63,11 @@ public class SecurityConfig {
                 .requestMatchers("/api/cash-movements/**").hasAnyRole("OWNER", "MANAGER")
                 .requestMatchers("/api/cash-sessions/**").hasAnyRole("OWNER", "MANAGER")
 
-                // Reportes (ventas, cuentas por cobrar, valuación): solo Dueño y Gerente
+                // Reporte consolidado de todas las sucursales: SOLO el Dueño.
+                // Debe ir ANTES de la regla general de /api/reports/**.
+                .requestMatchers("/api/reports/global/**").hasRole("OWNER")
+
+                // Reportes por sucursal (ventas, cuentas por cobrar, valuación): Dueño y Gerente
                 .requestMatchers("/api/reports/**").hasAnyRole("OWNER", "MANAGER")
 
                 // Configuración: leerla la necesita cualquiera (para imprimir el ticket),

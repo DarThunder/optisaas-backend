@@ -65,7 +65,15 @@ public class JwtUtils {
     }
 
     public ResponseCookie getCleanJwtCookie() {
-        return ResponseCookie.from(jwtCookie, null).path("/api").build();
+        // maxAge(0) indica al navegador que elimine la cookie de inmediato.
+        // Debe coincidir en path/httpOnly/sameSite con la cookie original para borrarla bien.
+        return ResponseCookie.from(jwtCookie, "")
+                .path("/api")
+                .maxAge(0)
+                .httpOnly(true)
+                .secure(false)
+                .sameSite(sameSite)
+                .build();
     }
 
     public boolean validateJwtToken(String authToken) {
