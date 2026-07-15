@@ -7,6 +7,8 @@ import com.idar.optisaas.dto.LoginRequest;
 import com.idar.optisaas.entity.User;
 import com.idar.optisaas.entity.UserBranchRole;
 import com.idar.optisaas.repository.UserRepository;
+import com.idar.optisaas.security.AttemptLimiter;
+import com.idar.optisaas.security.PinEncoder;
 import com.idar.optisaas.util.JwtUtils;
 import com.idar.optisaas.util.Role;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,9 +31,22 @@ public class AuthService {
     @Autowired
     private JwtUtils jwtUtils;
 
+    @Autowired
+    private AttemptLimiter attemptLimiter;
+
+    @Autowired
+    private PinEncoder pinEncoder;
+
     public ResponseCookie login(LoginRequest request) {
+        String key = "login:" + safeKey(request.getIdentifier());
+        attemptLimiter.assertNotBlocked(key);
+
         User user = userRepository.findByEmailOrUsername(request.getIdentifier(), request.getIdentifier())
-                .orElseThrow(() -> new RuntimeException("Usuario no encontrado (Email o ID inválido)"));
+                .orElse(null);
+        if (user == null) {
+            attemptLimiter.recordFailure(key);
+            throw new RuntimeException("Usuario no encontrado (Email o ID inválido)");
+        }
 
         // Cuenta creada pero aún sin credenciales propias: debe activarse primero.
         if (!user.isCredentialsSet() || user.getPassword() == null) {
@@ -39,8 +54,11 @@ public class AuthService {
         }
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            attemptLimiter.recordFailure(key);
             throw new RuntimeException("Credenciales inválidas");
         }
+
+        attemptLimiter.reset(key);
 
         String principal = (user.getEmail() != null && !user.getEmail().isEmpty())
                 ? user.getEmail()
@@ -99,16 +117,33 @@ public class AuthService {
     }
 
     public AuthResponse accessHub(String identifier, String pin) {
+        String key = "hub:" + safeKey(identifier);
+        attemptLimiter.assertNotBlocked(key);
+
         User user = userRepository.findByEmailOrUsername(identifier, identifier)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
         Role globalRole = getGlobalAdminRole(user);
 
-        String expectedPin = user.getQuickPin() != null ? user.getQuickPin() : "1234";
+        // Sin fallback: si el usuario no tiene PIN maestro configurado, no puede entrar
+        // al hub hasta definirlo (se evita el backdoor "1234").
+        String storedPin = user.getQuickPin();
+        if (storedPin == null || storedPin.isBlank()) {
+            throw new RuntimeException("No tienes un PIN maestro configurado. Defínelo desde tu perfil.");
+        }
 
-        if (!expectedPin.equals(pin)) {
+        if (!pinEncoder.matches(pin, storedPin)) {
+            attemptLimiter.recordFailure(key);
             throw new RuntimeException("Clave maestra incorrecta.");
         }
+
+        // Migración perezosa de PIN heredado en texto plano.
+        if (pinEncoder.needsUpgrade(storedPin)) {
+            user.setQuickPin(pinEncoder.encode(pin));
+            userRepository.save(user);
+        }
+
+        attemptLimiter.reset(key);
 
         return new AuthResponse(
                 "Acceso global concedido",
@@ -117,6 +152,10 @@ public class AuthService {
                 "Global Hub",
                 globalRole.name()
         );
+    }
+
+    private String safeKey(String s) {
+        return s == null ? "" : s.trim().toLowerCase();
     }
 
     private Role getGlobalAdminRole(User user) {

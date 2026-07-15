@@ -10,6 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -23,6 +24,14 @@ public class SecurityConfig {
 
     @Autowired
     private AuthTokenFilter authTokenFilter;
+
+    @Autowired
+    private HubScopeGuardFilter hubScopeGuardFilter;
+
+    // Orígenes permitidos para CORS. Configurable por entorno (coma-separado).
+    // En producción, fijar al dominio real del frontend.
+    @Value("${app.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000}")
+    private List<String> allowedOrigins;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -44,9 +53,11 @@ public class SecurityConfig {
                 // Permitir pre-flight requests (OPTIONS)
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 
-                // Endpoints públicos (Auth y Actuator)
+                // Endpoints públicos (Auth). Salud del sistema pública para health-checks;
+                // el resto de actuator queda restringido al Dueño.
                 .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/actuator/**").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                .requestMatchers("/actuator/**").hasRole("OWNER")
                 
                 // Cambio de operador (fichaje por PIN): cualquier autenticado puede intentarlo,
                 // el PIN de 4 dígitos del empleado destino es la propia validación de esta acción.
@@ -99,8 +110,10 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             );
 
-        // 4. Inyectar nuestro filtro de JWT antes del filtro de autenticación de Spring
+        // 4. Inyectar nuestro filtro de JWT antes del filtro de autenticación de Spring,
+        // y el guardián de alcance de Hub justo después (ya hay contexto de sesión).
         http.addFilterBefore(authTokenFilter, UsernamePasswordAuthenticationFilter.class);
+        http.addFilterAfter(hubScopeGuardFilter, AuthTokenFilter.class);
 
         return http.build();
     }
@@ -113,8 +126,8 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         
-        // Orígenes permitidos (ajusta según tu entorno de desarrollo/producción)
-        configuration.setAllowedOrigins(List.of("http://localhost:3000", "http://127.0.0.1:3000"));
+        // Orígenes permitidos (configurables por entorno: app.cors.allowed-origins)
+        configuration.setAllowedOrigins(allowedOrigins);
         
         // Métodos permitidos
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));

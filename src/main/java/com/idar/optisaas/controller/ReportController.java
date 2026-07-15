@@ -32,6 +32,60 @@ public class ReportController {
         }
     }
 
+    // Tendencias consolidadas: ventas por día del periodo + comparativo contra periodo anterior.
+    @GetMapping("/global/trends")
+    public ResponseEntity<?> globalTrends(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            return ResponseEntity.ok(ownerReportService.globalTrends(auth.getName(), from, to));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    // Inventario consolidado: más vendidos, próximos a agotarse y sin movimiento.
+    @GetMapping("/global/inventory")
+    public ResponseEntity<?> globalInventory(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            return ResponseEntity.ok(ownerReportService.globalInventory(auth.getName(), from, to));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    // Meta mensual del dueño: avance real y proyección de cierre.
+    @GetMapping("/global/goal")
+    public ResponseEntity<?> getGoal(
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer month) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            return ResponseEntity.ok(ownerReportService.getMonthlyGoal(auth.getName(), year, month));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    // Crear/actualizar la meta mensual del dueño.
+    @PutMapping("/global/goal")
+    public ResponseEntity<?> setGoal(@RequestBody Map<String, Object> body) {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            Integer year = body.get("year") != null ? Integer.valueOf(body.get("year").toString()) : null;
+            Integer month = body.get("month") != null ? Integer.valueOf(body.get("month").toString()) : null;
+            java.math.BigDecimal target = body.get("target") != null
+                    ? new java.math.BigDecimal(body.get("target").toString()) : null;
+            return ResponseEntity.ok(ownerReportService.setMonthlyGoal(auth.getName(), year, month, target));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
     @GetMapping("/sales")
     public ResponseEntity<?> salesReport(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,

@@ -6,6 +6,7 @@ import com.idar.optisaas.service.UserService;
 import com.idar.optisaas.security.TenantContext;
 import com.idar.optisaas.util.JwtUtils;
 import com.idar.optisaas.util.Role;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -23,6 +24,8 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/users")
 public class EmployeeController {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(EmployeeController.class);
 
     @Autowired
     private UserService userService;
@@ -88,9 +91,70 @@ public class EmployeeController {
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Error al obtener empleados", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Error al obtener empleados: " + e.getMessage()));
+                    .body(Map.of("error", "No se pudo obtener la lista de empleados."));
+        }
+    }
+
+    // ===================== AUTO-SERVICIO DE PERFIL =====================
+    // El usuario autenticado consulta y edita SU propia cuenta (nombre, correo,
+    // contraseña y PIN maestro). No usa {id}: siempre opera sobre quien va en el token.
+
+    @GetMapping("/me")
+    public ResponseEntity<?> getMyProfile() {
+        try {
+            return ResponseEntity.ok(userService.getMyProfile(currentUsername()));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/me/profile")
+    public ResponseEntity<?> updateMyProfile(@RequestBody Map<String, String> body, HttpServletRequest request) {
+        try {
+            User updated = userService.updateMyProfile(currentUsername(), body.get("fullName"), body.get("email"));
+
+            Map<String, Object> payload = Map.of(
+                    "id", updated.getId(),
+                    "fullName", updated.getFullName(),
+                    "email", updated.getEmail() != null ? updated.getEmail() : ""
+            );
+
+            // Blindaje: reemitimos el token usando el 'username' (estable, no editable) como
+            // subject. Así, aunque el usuario cambie su correo —que quizá era su identificador
+            // de login— la sesión en curso sigue siendo válida sin necesidad de re-loguear.
+            String jwt = jwtUtils.getJwtFromCookies(request);
+            if (jwt != null && jwtUtils.validateJwtToken(jwt)
+                    && updated.getUsername() != null && !updated.getUsername().isBlank()) {
+                Long branchId = jwtUtils.getBranchIdFromToken(jwt);
+                String role = jwtUtils.getRoleFromToken(jwt);
+                ResponseCookie cookie = jwtUtils.generateFullAccessCookie(updated.getUsername(), branchId, role);
+                return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString()).body(payload);
+            }
+            return ResponseEntity.ok(payload);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/me/password")
+    public ResponseEntity<?> changeMyPassword(@RequestBody Map<String, String> body) {
+        try {
+            userService.changeMyPassword(currentUsername(), body.get("currentPassword"), body.get("newPassword"));
+            return ResponseEntity.ok(Map.of("message", "Contraseña actualizada correctamente"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/me/master-pin")
+    public ResponseEntity<?> updateMyMasterPin(@RequestBody Map<String, String> body) {
+        try {
+            userService.updateMyMasterPin(currentUsername(), body.get("currentPassword"), body.get("newPin"));
+            return ResponseEntity.ok(Map.of("message", "PIN maestro actualizado correctamente"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
     }
 

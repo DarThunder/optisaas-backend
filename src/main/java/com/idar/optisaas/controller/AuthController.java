@@ -47,17 +47,16 @@ public class AuthController {
         if (jwt == null || !jwtUtils.validateJwtToken(jwt) || !jwtUtils.isFullToken(jwt)) {
             return ResponseEntity.status(401).body(Map.of("authenticated", false));
         }
+        // branchId presente = sesión dentro de una sucursal; null = sesión del Hub global
+        // (panel de administrador). Ambas son sesiones válidas; el frontend enruta según cuál.
         Long branchId = jwtUtils.getBranchIdFromToken(jwt);
-        if (branchId == null) {
-            // Token global (hub) sin sucursal elegida: no es una sesión dentro de la app.
-            return ResponseEntity.status(401).body(Map.of("authenticated", false));
-        }
 
         Map<String, Object> body = new java.util.HashMap<>();
         body.put("authenticated", true);
         body.put("username", jwtUtils.getUserNameFromJwtToken(jwt));
         body.put("role", jwtUtils.getRoleFromToken(jwt));
         body.put("branchId", branchId);
+        body.put("scope", branchId != null ? "BRANCH" : "HUB");
         return ResponseEntity.ok(body);
     }
 

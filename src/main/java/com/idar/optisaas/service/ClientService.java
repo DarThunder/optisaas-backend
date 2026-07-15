@@ -39,6 +39,9 @@ public class ClientService {
         Long branchId = getCurrentBranchId();
         Long ownerId = getCurrentOwnerId();
 
+        // Seguridad: al crear, el id lo asigna la BD. Si el body trae un 'id' de otro
+        // registro, save() haría un merge y sobrescribiría/robaría ese cliente ajeno.
+        client.setId(null);
         client.setBranchId(branchId);
         client.setOwnerId(ownerId);
         return clientRepository.save(client);

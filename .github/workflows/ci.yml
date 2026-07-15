@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: opti_admin
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: optisaas_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opti_admin -d optisaas_core"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DB_URL: jdbc:postgresql://localhost:5432/optisaas_core
+      DB_USER: opti_admin
+      DB_PASSWORD: ci_password
+      # Secreto solo para CI (no real). HS256 exige >= 32 bytes en base64.
+      JWT_SECRET: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      DDL_AUTO: validate
+      SEED_ENABLED: "false"
+      COOKIE_SECURE: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build & test
+        run: ./mvnw -B -ntp verify

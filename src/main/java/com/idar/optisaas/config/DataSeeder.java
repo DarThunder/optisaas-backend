@@ -4,6 +4,7 @@ import com.idar.optisaas.entity.*;
 import com.idar.optisaas.repository.*;
 import com.idar.optisaas.util.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -25,9 +26,18 @@ public class DataSeeder implements CommandLineRunner {
     @Autowired private PriceMatrixRepository priceMatrixRepository;
     @Autowired private LensBasePriceRepository lensBasePriceRepository;
 
+    // En producción debe ser false: no se cargan datos/credenciales de ejemplo.
+    @Value("${app.seed.enabled:true}")
+    private boolean seedEnabled;
+
     @Override
     @Transactional
     public void run(String... args) throws Exception {
+        if (!seedEnabled) {
+            System.out.println(">>> DataSeeder deshabilitado (app.seed.enabled=false). Omitiendo carga inicial.");
+            return;
+        }
+
         if (branchRepository.count() > 0) {
             ensureAdminUserIsOwner();
             ensureSurfacingProductExists();
@@ -51,7 +61,7 @@ public class DataSeeder implements CommandLineRunner {
         user.setFullName("Administrador");
         user.setPassword(passwordEncoder.encode("admin123"));
         user.setActive(true);
-        user.setQuickPin("1234");
+        user.setQuickPin(passwordEncoder.encode("1234"));
         
         UserBranchRole role = new UserBranchRole();
         role.setBranch(savedBranch);
@@ -159,14 +169,14 @@ public class DataSeeder implements CommandLineRunner {
     private void ensureAdminUserIsOwner() {
     userRepository.findByEmailOrUsername("admin@mogar.com", "admin")
             .ifPresent(admin -> {
-                admin.setQuickPin("1234");
-
+                // Nota: NO se toca el quickPin aquí. Antes se reseteaba a "1234" en cada
+                // arranque, lo que sobrescribía el PIN maestro real del dueño (backdoor).
                 if (admin.getBranchRoles() != null) {
                     admin.getBranchRoles().forEach(role -> role.setRole(Role.OWNER));
                 }
 
                 userRepository.save(admin);
-                System.out.println(">>> Admin reparado: rol OWNER y quickPin configurado.");
+                System.out.println(">>> Admin reparado: rol OWNER asegurado.");
             });
 }
 }

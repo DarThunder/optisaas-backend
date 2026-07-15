@@ -1,0 +1,16 @@
+# Override de producción.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Notas de despliegue de prod:
+#  - La base de datos NO debe exponer su puerto al exterior. En este override se elimina
+#    el mapeo de puerto de postgres-db (queda accesible solo dentro de la red de Compose).
+#  - Coloca la app detrás de un reverse proxy con HTTPS (Nginx/Caddy/Traefik) y pon
+#    COOKIE_SECURE=true, DDL_AUTO=validate, SEED_ENABLED=false en el .env de prod.
+services:
+  app:
+    restart: always
+
+  postgres-db:
+    restart: always
+    # Sin mapeo de puertos: la DB no es accesible desde el host/red, solo desde la app.
+    ports: !reset []

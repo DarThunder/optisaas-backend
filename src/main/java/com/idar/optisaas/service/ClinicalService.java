@@ -72,8 +72,16 @@ public class ClinicalService {
     // para leer los datos del cliente/optometrista antes de convertirlos a DTO.
     @Transactional(readOnly = true)
     public List<ClinicalRecordResponse> getRecordsByClient(Long clientId) {
+        Long branchId = TenantContext.getCurrentBranch();
+        // Defensa explícita: no confiar solo en el filtro Hibernate (que se desactiva
+        // en sesiones de Hub). Sin sucursal activa no se listan expedientes; con ella,
+        // solo los de esa sucursal.
+        if (branchId == null) {
+            return List.of();
+        }
         List<ClinicalRecord> records = recordRepository.findByClient_IdOrderByCreatedAtDesc(clientId);
         return records.stream()
+                .filter(r -> branchId.equals(r.getBranchId()))
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }

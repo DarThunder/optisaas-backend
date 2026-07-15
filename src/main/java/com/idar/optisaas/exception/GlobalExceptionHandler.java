@@ -1,5 +1,7 @@
 package com.idar.optisaas.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -14,11 +16,13 @@ import java.util.Map;
 @ControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Object> handleDatabaseError(DataIntegrityViolationException ex) {
-        System.err.println(">>> DATABASE ERROR CAPTURADO:"); // LOG VISIBLE
-        ex.printStackTrace(); // IMPRIMIR EN CONSOLA
-        
+        // Detalle completo solo en logs del servidor, nunca en la respuesta.
+        log.error("Error de integridad de datos", ex);
+
         Map<String, Object> body = Map.of(
             "timestamp", LocalDateTime.now(),
             "message", "Error de integridad de datos (posible duplicado o datos faltantes).",
@@ -29,14 +33,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Object> handleRuntimeException(RuntimeException ex) {
-        // --- ESTO ES LO QUE FALTABA ---
-        System.err.println(">>> RUNTIME EXCEPTION CAPTURADA (Causante del 400):");
-        ex.printStackTrace(); // ¡Aquí veremos el error real!
-        // ------------------------------
+        // Las RuntimeException del dominio llevan mensajes pensados para el usuario
+        // (validaciones de negocio); se devuelven tal cual. El detalle va a los logs.
+        log.warn("Regla de negocio o error controlado: {}", ex.getMessage());
 
         Map<String, Object> body = Map.of(
             "timestamp", LocalDateTime.now(),
-            "message", "Error interno: " + ex.getMessage(), // Enviamos el mensaje real al frontend
+            "message", ex.getMessage() != null ? ex.getMessage() : "Solicitud inválida",
             "status", HttpStatus.BAD_REQUEST.value()
         );
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
@@ -45,8 +48,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Object> handleValidationException(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new HashMap<>();
-        
-        ex.getBindingResult().getFieldErrors().forEach(error -> 
+
+        ex.getBindingResult().getFieldErrors().forEach(error ->
             errors.put(error.getField(), error.getDefaultMessage())
         );
 
@@ -59,16 +62,16 @@ public class GlobalExceptionHandler {
 
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
     }
-    
-    // Catch-all para cualquier otra cosa que no sea RuntimeException
+
+    // Catch-all: cualquier excepción inesperada. NO se expone el mensaje interno
+    // (puede contener detalles de implementación/BD) — solo un mensaje genérico.
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> handleGeneralException(Exception ex) {
-        System.err.println(">>> EXCEPTION GENERAL CAPTURADA:");
-        ex.printStackTrace();
-        
+        log.error("Error inesperado del servidor", ex);
+
         Map<String, Object> body = Map.of(
             "timestamp", LocalDateTime.now(),
-            "message", "Error inesperado del servidor: " + ex.getMessage(),
+            "message", "Error inesperado del servidor. Inténtalo de nuevo o contacta a soporte.",
             "status", HttpStatus.INTERNAL_SERVER_ERROR.value()
         );
         return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);

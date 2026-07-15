@@ -3,6 +3,8 @@ package com.idar.optisaas.service;
 import com.idar.optisaas.dto.EmployeeRequest;
 import com.idar.optisaas.entity.*;
 import com.idar.optisaas.repository.*;
+import com.idar.optisaas.security.AttemptLimiter;
+import com.idar.optisaas.security.PinEncoder;
 import com.idar.optisaas.security.TenantContext;
 import com.idar.optisaas.util.Role;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +25,8 @@ public class UserService {
     @Autowired private BranchRepository branchRepository;
     @Autowired private UserBranchRoleRepository roleRepository;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private AttemptLimiter attemptLimiter;
+    @Autowired private PinEncoder pinEncoder;
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int ACTIVATION_CODE_VALID_DAYS = 7;
@@ -119,6 +123,9 @@ public class UserService {
     // =======================================================================
     @Transactional
     public void activateAccount(String identifier, String code, String newPassword, String newPin) {
+        String attemptKey = "activate:" + (identifier == null ? "" : identifier.trim().toLowerCase());
+        attemptLimiter.assertNotBlocked(attemptKey);
+
         User user = userRepository.findByEmailOrUsername(identifier, identifier)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
@@ -126,25 +133,27 @@ public class UserService {
             throw new RuntimeException("Esta cuenta ya fue activada. Inicia sesión normalmente.");
         }
         if (user.getActivationCode() == null || !user.getActivationCode().equals(code)) {
+            attemptLimiter.recordFailure(attemptKey);
             throw new RuntimeException("Código de activación inválido");
         }
         if (user.getActivationCodeExpiresAt() != null && user.getActivationCodeExpiresAt().isBefore(LocalDateTime.now())) {
             throw new RuntimeException("El código de activación expiró. Pide uno nuevo a tu administrador.");
         }
-        if (newPassword == null || newPassword.length() < 4) {
-            throw new RuntimeException("La contraseña debe tener al menos 4 caracteres");
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new RuntimeException("La contraseña debe tener al menos 8 caracteres");
         }
         if (newPin == null || !newPin.matches("\\d{4}")) {
             throw new RuntimeException("El PIN debe ser de 4 dígitos");
         }
 
         user.setPassword(passwordEncoder.encode(newPassword));
-        user.setQuickPin(newPin);
+        user.setQuickPin(pinEncoder.encode(newPin));
         user.setCredentialsSet(true);
         user.setActivationCode(null);
         user.setActivationCodeExpiresAt(null);
 
         userRepository.save(user);
+        attemptLimiter.reset(attemptKey);
     }
 
     // =======================================================================
@@ -205,6 +214,9 @@ public class UserService {
     }
 
     public User validateEmployeePin(Long id, String pin) {
+        String key = "emp-pin:" + id;
+        attemptLimiter.assertNotBlocked(key);
+
         if (pin == null || pin.isBlank()) {
             throw new RuntimeException("PIN requerido");
         }
@@ -216,10 +228,18 @@ public class UserService {
             throw new RuntimeException("Empleado inactivo");
         }
 
-        if (user.getQuickPin() == null || !user.getQuickPin().equals(pin)) {
+        if (!pinEncoder.matches(pin, user.getQuickPin())) {
+            attemptLimiter.recordFailure(key);
             throw new RuntimeException("PIN de autorización incorrecto");
         }
 
+        // Migración perezosa: si el PIN estaba en texto plano, lo re-hasheamos.
+        if (pinEncoder.needsUpgrade(user.getQuickPin())) {
+            user.setQuickPin(pinEncoder.encode(pin));
+            userRepository.save(user);
+        }
+
+        attemptLimiter.reset(key);
         return user;
     }
 
@@ -261,6 +281,75 @@ public class UserService {
                 .filter(u -> u.getBranchRoles().stream()
                         .anyMatch(r -> ownedBranchIds.contains(r.getBranch().getId())))
                 .collect(Collectors.toList());
+    }
+
+    // =======================================================================
+    // AUTO-SERVICIO DE PERFIL (el usuario autenticado gestiona SU propia cuenta)
+    // =======================================================================
+
+    /** Datos del perfil propio. Nunca expone contraseña ni PIN; solo si el PIN está definido. */
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> getMyProfile(String username) {
+        User me = getCaller(username);
+        java.util.Map<String, Object> map = new java.util.HashMap<>();
+        map.put("id", me.getId());
+        map.put("fullName", me.getFullName());
+        map.put("username", me.getUsername());
+        map.put("email", me.getEmail());
+        map.put("hasMasterPin", me.getQuickPin() != null && !me.getQuickPin().isBlank());
+        return map;
+    }
+
+    /** Actualiza nombre y correo del propio usuario, cuidando que el correo no choque con otro. */
+    @Transactional
+    public User updateMyProfile(String username, String fullName, String email) {
+        User me = getCaller(username);
+
+        if (fullName != null) {
+            if (fullName.isBlank()) throw new RuntimeException("El nombre no puede estar vacío");
+            me.setFullName(fullName.trim());
+        }
+        if (email != null && !email.equals(me.getEmail())) {
+            String clean = email.trim();
+            if (clean.isBlank() || !clean.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+                throw new RuntimeException("Correo electrónico inválido");
+            }
+            userRepository.findByEmailOrUsername(clean, clean).ifPresent(other -> {
+                if (!other.getId().equals(me.getId())) throw new RuntimeException("Ese correo ya está en uso");
+            });
+            me.setEmail(clean);
+        }
+        return userRepository.save(me);
+    }
+
+    /** Cambia la contraseña propia verificando la actual. */
+    @Transactional
+    public void changeMyPassword(String username, String currentPassword, String newPassword) {
+        User me = getCaller(username);
+        if (me.getPassword() == null || currentPassword == null
+                || !passwordEncoder.matches(currentPassword, me.getPassword())) {
+            throw new RuntimeException("La contraseña actual es incorrecta");
+        }
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new RuntimeException("La nueva contraseña debe tener al menos 8 caracteres");
+        }
+        me.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(me);
+    }
+
+    /** Actualiza el PIN maestro (quickPin) propio, confirmando con la contraseña de la cuenta. */
+    @Transactional
+    public void updateMyMasterPin(String username, String currentPassword, String newPin) {
+        User me = getCaller(username);
+        if (me.getPassword() == null || currentPassword == null
+                || !passwordEncoder.matches(currentPassword, me.getPassword())) {
+            throw new RuntimeException("La contraseña actual es incorrecta");
+        }
+        if (newPin == null || !newPin.matches("\\d{4}")) {
+            throw new RuntimeException("El PIN maestro debe ser de 4 dígitos");
+        }
+        me.setQuickPin(pinEncoder.encode(newPin));
+        userRepository.save(me);
     }
 
     // ------------------------- Helpers -------------------------

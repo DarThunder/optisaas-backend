@@ -27,7 +27,8 @@ public class User {
     // @JsonIgnore: el PIN de autorización nunca debe salir en ninguna respuesta
     // (se valida siempre contra el backend, jamás se compara en el cliente).
     @JsonIgnore
-    @Column(length = 4)
+    // Longitud amplia: ya no guarda 4 dígitos en texto plano, sino un hash BCrypt (~60 chars).
+    @Column(length = 100)
     private String quickPin;
     // -------------------------------
 

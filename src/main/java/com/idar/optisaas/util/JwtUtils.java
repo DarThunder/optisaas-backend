@@ -30,6 +30,11 @@ public class JwtUtils {
     @Value("${app.cookie.sameSite}")
     private String sameSite;
 
+    // En producción DEBE ser true (requiere HTTPS). Configurable por entorno para
+    // permitir desarrollo local sobre HTTP sin perder la cookie.
+    @Value("${app.cookie.secure}")
+    private boolean cookieSecure;
+
     public ResponseCookie generatePreAuthCookie(String email) {
         String jwt = Jwts.builder()
                 .setSubject(email)
@@ -71,7 +76,7 @@ public class JwtUtils {
                 .path("/api")
                 .maxAge(0)
                 .httpOnly(true)
-                .secure(false)
+                .secure(cookieSecure)
                 .sameSite(sameSite)
                 .build();
     }
@@ -102,6 +107,65 @@ public class JwtUtils {
         return "FULL".equals(type);
     }
 
+    // ==================== TOKEN DE TERMINAL ====================
+    // Marca a un dispositivo/navegador como "terminal" de una sucursal. Vive en una cookie
+    // aparte de la sesión, de larga duración y revocable: permite que los empleados inicien
+    // turno solo con su PIN, sin las credenciales de la cuenta.
+
+    private String terminalCookieName() {
+        return jwtCookie + "-terminal";
+    }
+
+    public ResponseCookie generateTerminalCookie(Long branchId) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("type", "TERMINAL");
+        claims.put("branchId", branchId);
+
+        long ninetyDaysMs = 90L * 24 * 60 * 60 * 1000;
+        String jwt = Jwts.builder()
+                .setSubject("terminal")
+                .addClaims(claims)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + ninetyDaysMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .compact();
+
+        return ResponseCookie.from(terminalCookieName(), jwt)
+                .path("/api")
+                .maxAge(90 * 24 * 60 * 60)
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(sameSite)
+                .build();
+    }
+
+    public String getTerminalTokenFromCookies(HttpServletRequest request) {
+        Cookie cookie = WebUtils.getCookie(request, terminalCookieName());
+        return (cookie != null) ? cookie.getValue() : null;
+    }
+
+    public boolean isTerminalToken(String token) {
+        try {
+            return "TERMINAL".equals(parseClaims(token).getBody().get("type", String.class));
+        } catch (JwtException e) {
+            return false;
+        }
+    }
+
+    public Long getBranchIdFromTerminal(String token) {
+        return parseClaims(token).getBody().get("branchId", Long.class);
+    }
+
+    public ResponseCookie getCleanTerminalCookie() {
+        return ResponseCookie.from(terminalCookieName(), "")
+                .path("/api")
+                .maxAge(0)
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(sameSite)
+                .build();
+    }
+
     private Jws<Claims> parseClaims(String token) {
         return Jwts.parserBuilder().setSigningKey(key()).build().parseClaimsJws(token);
     }
@@ -116,7 +180,7 @@ public class JwtUtils {
                 .path("/api")
                 .maxAge(24 * 60 * 60)
                 .httpOnly(true)
-                .secure(false)
+                .secure(cookieSecure)
                 .sameSite(sameSite)
                 .build();
     }
