@@ -44,6 +44,15 @@ public class Sale extends BaseEntity {
     private BigDecimal discountAmount = BigDecimal.ZERO;
     private String discountName;
 
+    /**
+     * Valor de la mercancía devuelta (descuento ya prorrateado). Baja lo que el cliente debe,
+     * pero NO toca totalAmount: la venta original se conserva tal como ocurrió.
+     */
+    private BigDecimal returnedAmount = BigDecimal.ZERO;
+
+    /** Dinero reintegrado al cliente. paidAmount sigue siendo el bruto que entró en su momento. */
+    private BigDecimal refundedAmount = BigDecimal.ZERO;
+
     @OneToMany(mappedBy = "sale", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @JsonManagedReference
     private List<SaleItem> items = new ArrayList<>();
@@ -54,8 +63,21 @@ public class Sale extends BaseEntity {
     
     private boolean isParked = false; 
 
+    /**
+     * Lo que el cliente todavía debe: lo que se queda menos lo que pagó en neto.
+     *
+     * totalAmount y paidAmount son historia bruta e inmutable; las devoluciones se expresan
+     * restando por separado, de modo que el saldo se ajusta solo y las cuentas por cobrar
+     * (ver ReportService) nunca cobran mercancía que ya regresó.
+     */
     public BigDecimal getRemainingBalance() {
         if (totalAmount == null) return BigDecimal.ZERO;
-        return totalAmount.subtract(paidAmount != null ? paidAmount : BigDecimal.ZERO);
+        BigDecimal kept = totalAmount.subtract(nz(returnedAmount));
+        BigDecimal netPaid = nz(paidAmount).subtract(nz(refundedAmount));
+        return kept.subtract(netPaid);
+    }
+
+    private static BigDecimal nz(BigDecimal value) {
+        return value != null ? value : BigDecimal.ZERO;
     }
 }

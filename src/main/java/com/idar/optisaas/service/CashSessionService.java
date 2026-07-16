@@ -5,8 +5,10 @@ import com.idar.optisaas.entity.User;
 import com.idar.optisaas.repository.CashMovementRepository;
 import com.idar.optisaas.repository.CashSessionRepository;
 import com.idar.optisaas.repository.PaymentRepository;
+import com.idar.optisaas.repository.RefundRepository;
 import com.idar.optisaas.repository.UserRepository;
 import com.idar.optisaas.security.TenantContext;
+import com.idar.optisaas.util.AuditAction;
 import com.idar.optisaas.util.CashMovementType;
 import com.idar.optisaas.util.CashSessionStatus;
 import com.idar.optisaas.util.PaymentMethod;
@@ -24,8 +26,10 @@ public class CashSessionService {
 
     @Autowired private CashSessionRepository sessionRepository;
     @Autowired private PaymentRepository paymentRepository;
+    @Autowired private RefundRepository refundRepository;
     @Autowired private CashMovementRepository movementRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private AuditService auditService;
 
     // ---------------------------------------------------------------
     // ABRIR CAJA
@@ -47,6 +51,10 @@ public class CashSessionService {
         session.setOpeningFloat(openingFloat != null ? openingFloat : BigDecimal.ZERO);
 
         CashSession saved = sessionRepository.save(session);
+
+        auditService.log(AuditAction.CASH_SESSION_OPENED, "CashSession", saved.getId(),
+                "fondo inicial: " + saved.getOpeningFloat());
+
         return currentSession(); // devuelve la caja recién abierta con su tally
     }
 
@@ -108,6 +116,13 @@ public class CashSessionService {
 
         sessionRepository.save(session);
 
+        // El corte es la acción de dinero más delicada: registramos esperado vs contado
+        // y la diferencia, que es justo lo que se audita en una disputa.
+        auditService.log(AuditAction.CASH_SESSION_CLOSED, "CashSession", session.getId(),
+                "esperado: " + expected + "; contado: " + counted
+                        + "; diferencia: " + session.getDifference()
+                        + "; fondo inicial: " + session.getOpeningFloat());
+
         Map<String, Object> result = new LinkedHashMap<>(tally);
         result.put("id", session.getId());
         result.put("openedAt", session.getOpenedAt());
@@ -134,6 +149,19 @@ public class CashSessionService {
             else if (method == PaymentMethod.TRANSFER) transferSales = transferSales.add(amt);
         }
 
+        // Los reembolsos son dinero que salió: se restan del cobrado por su mismo medio.
+        BigDecimal cashRefunds = BigDecimal.ZERO;
+        BigDecimal cardRefunds = BigDecimal.ZERO;
+        BigDecimal transferRefunds = BigDecimal.ZERO;
+
+        for (var r : refundRepository.findByBranchIdAndCreatedAtBetween(branchId, start, end)) {
+            BigDecimal amt = r.getAmount() != null ? r.getAmount() : BigDecimal.ZERO;
+            PaymentMethod method = r.getMethod();
+            if (method == PaymentMethod.CASH) cashRefunds = cashRefunds.add(amt);
+            else if (method == PaymentMethod.CARD || method == PaymentMethod.CREDIT_CARD || method == PaymentMethod.DEBIT_CARD) cardRefunds = cardRefunds.add(amt);
+            else if (method == PaymentMethod.TRANSFER) transferRefunds = transferRefunds.add(amt);
+        }
+
         BigDecimal cashIncome = BigDecimal.ZERO;
         BigDecimal cashExpense = BigDecimal.ZERO;
         for (var m : movementRepository.findByBranchIdAndCreatedAtBetweenOrderByCreatedAtDesc(branchId, start, end)) {
@@ -143,12 +171,16 @@ public class CashSessionService {
         }
 
         BigDecimal base = openingFloat != null ? openingFloat : BigDecimal.ZERO;
-        BigDecimal expectedCash = base.add(cashSales).add(cashIncome).subtract(cashExpense);
+        BigDecimal expectedCash = base.add(cashSales).add(cashIncome)
+                .subtract(cashExpense).subtract(cashRefunds);
 
         Map<String, BigDecimal> tally = new LinkedHashMap<>();
         tally.put("cashSales", cashSales);
         tally.put("cardSales", cardSales);
         tally.put("transferSales", transferSales);
+        tally.put("cashRefunds", cashRefunds);
+        tally.put("cardRefunds", cardRefunds);
+        tally.put("transferRefunds", transferRefunds);
         tally.put("cashIncome", cashIncome);
         tally.put("cashExpense", cashExpense);
         tally.put("expectedCash", expectedCash);

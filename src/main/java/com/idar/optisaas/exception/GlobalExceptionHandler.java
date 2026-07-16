@@ -31,6 +31,18 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.CONFLICT);
     }
 
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<Object> handleConflict(ConflictException ex) {
+        log.warn("Conflicto de estado: {}", ex.getMessage());
+
+        Map<String, Object> body = Map.of(
+            "timestamp", LocalDateTime.now(),
+            "message", ex.getMessage(),
+            "status", HttpStatus.CONFLICT.value()
+        );
+        return new ResponseEntity<>(body, HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Object> handleRuntimeException(RuntimeException ex) {
         // Las RuntimeException del dominio llevan mensajes pensados para el usuario

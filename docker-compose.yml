@@ -28,7 +28,10 @@ services:
     ports:
       # Solo accesible desde la propia máquina (no expuesto a la red/LAN). En prod se
       # elimina por completo con docker-compose.prod.yml.
-      - "127.0.0.1:5432:5432"
+      # Puerto del HOST configurable (DB_HOST_PORT): por defecto 5433 para no chocar con
+      # un PostgreSQL nativo que ocupe el 5432. La app NO usa este puerto: se conecta por
+      # la red interna de Docker a postgres-db:5432.
+      - "127.0.0.1:${DB_HOST_PORT:-5433}:5432"
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
     healthcheck:

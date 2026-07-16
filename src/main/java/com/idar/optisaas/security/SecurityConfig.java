@@ -70,6 +70,15 @@ public class SecurityConfig {
                 .requestMatchers("/api/users/**").hasAnyRole("OWNER", "MANAGER")
                 .requestMatchers("/api/branches/**").hasRole("OWNER")
 
+                // Bitácora de auditoría: solo el Dueño (el servicio la acota a SUS sucursales).
+                .requestMatchers("/api/audit/**").hasRole("OWNER")
+
+                // Devoluciones: registrarlas reingresa mercancía y saca dinero de la caja,
+                // así que son de Dueño/Gerente. Consultarlas las necesita el vendedor para
+                // ver el detalle de la venta, y el servicio las acota a su sucursal.
+                // Debe ir ANTES de la regla general de /api/sales/**.
+                .requestMatchers(HttpMethod.POST, "/api/sales/*/refunds").hasAnyRole("OWNER", "MANAGER")
+
                 // Cortes / movimientos de caja y sesiones de caja: solo Dueño y Gerente
                 .requestMatchers("/api/cash-movements/**").hasAnyRole("OWNER", "MANAGER")
                 .requestMatchers("/api/cash-sessions/**").hasAnyRole("OWNER", "MANAGER")
@@ -89,6 +98,12 @@ public class SecurityConfig {
                 // pero solo Dueño/Gerente pueden crear, editar o borrar productos.
                 .requestMatchers(HttpMethod.GET, "/api/products/**").authenticated()
                 .requestMatchers("/api/products/**").hasAnyRole("OWNER", "MANAGER")
+
+                // Compras e inventario: proveedores, órdenes de compra (recibir mercancía cambia
+                // stock y costo) y ajustes (mermas). Todo esto es gestión, no mostrador: Dueño/Gerente.
+                .requestMatchers("/api/suppliers/**").hasAnyRole("OWNER", "MANAGER")
+                .requestMatchers("/api/purchase-orders/**").hasAnyRole("OWNER", "MANAGER")
+                .requestMatchers("/api/inventory-adjustments/**").hasAnyRole("OWNER", "MANAGER")
 
                 // Precios: el cálculo y la consulta los usa cualquiera al vender;
                 // solo Dueño/Gerente configuran las tablas de precios.
@@ -132,8 +147,9 @@ public class SecurityConfig {
         // Métodos permitidos
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         
-        // Cabeceras permitidas
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
+        // Cabeceras permitidas. Idempotency-Key va aquí: sin listarla, el navegador la bloquea
+        // en el preflight y la protección contra duplicados nunca llegaría al backend.
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control", "Idempotency-Key"));
         
         // IMPORTANTE: Permitir el envío de la Cookie 'optisaas-auth-token'
         configuration.setAllowCredentials(true); 

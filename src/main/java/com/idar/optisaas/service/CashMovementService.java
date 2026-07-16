@@ -4,6 +4,7 @@ import com.idar.optisaas.dto.*;
 import com.idar.optisaas.entity.*;
 import com.idar.optisaas.repository.*;
 import com.idar.optisaas.security.TenantContext;
+import com.idar.optisaas.util.AuditAction;
 import com.idar.optisaas.util.CashMovementType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ public class CashMovementService {
 
     @Autowired private CashMovementRepository movementRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private AuditService auditService;
 
     @Transactional
     public CashMovementResponse createMovement(CashMovementRequest request, String username) {
@@ -32,6 +34,11 @@ public class CashMovementService {
         movement.setRegisteredBy(user);
 
         CashMovement saved = movementRepository.save(movement);
+
+        auditService.log(AuditAction.CASH_MOVEMENT_CREATED, "CashMovement", saved.getId(),
+                "tipo: " + saved.getType() + "; monto: " + saved.getAmount()
+                        + "; motivo: " + saved.getReason());
+
         return mapToResponse(saved);
     }
 

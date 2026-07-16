@@ -20,5 +20,9 @@ public class SaleResponse {
     private BigDecimal discountAmount;
     private String discountName;
 
+    /** Valor de la mercancía devuelta y dinero reintegrado. Cero en una venta sin devoluciones. */
+    private BigDecimal returnedAmount;
+    private BigDecimal refundedAmount;
+
     private List<SaleItemResponse> items; 
 }

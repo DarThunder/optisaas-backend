@@ -1,9 +1,10 @@
 package com.idar.optisaas.controller;
 
+import com.idar.optisaas.service.IdempotencyService;
+import com.idar.optisaas.service.RefundService;
 import com.idar.optisaas.service.SaleService;
 import com.idar.optisaas.dto.*;
-// Importamos Sale entidad solo si es necesario para el metodo legacy getSalesByClient
-import com.idar.optisaas.entity.Sale; 
+import com.idar.optisaas.util.IdempotencyScope;
 
 import java.util.List;
 import java.util.Map; // Importante para PATCH
@@ -22,12 +23,33 @@ public class SaleController {
     @Autowired
     private SaleService saleService;
 
+    @Autowired
+    private RefundService refundService;
+
+    @Autowired
+    private IdempotencyService idempotencyService;
+
+    /**
+     * La envoltura de idempotencia vive aquí y no dentro de SaleService porque una llamada
+     * interna (this.createSale()) se saltaría el proxy de Spring y la operación de negocio
+     * se quedaría sin su @Transactional. El controlador sí tiene el proxy del servicio.
+     */
     @PostMapping
-    public ResponseEntity<SaleResponse> createSale(@Valid @RequestBody SaleRequest request) {
+    public ResponseEntity<SaleResponse> createSale(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody SaleRequest request) {
+
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         String sellerEmail = auth.getName();
 
-        SaleResponse response = saleService.createSale(request, sellerEmail);
+        SaleResponse response = idempotencyService.run(
+                IdempotencyScope.SALE_CREATE,
+                idempotencyKey,
+                request,
+                () -> saleService.createSale(request, sellerEmail),
+                SaleResponse::getSaleId,
+                saleService::getSaleById);
+
         return ResponseEntity.ok(response);
     }
 
@@ -44,11 +66,50 @@ public class SaleController {
 
     @PostMapping("/{id}/payments")
     public ResponseEntity<SaleResponse> addPayment(
-            @PathVariable Long id, 
+            @PathVariable Long id,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody PaymentRequest request) {
-            
-        SaleResponse response = saleService.addPayment(id, request);
+
+        // La huella incluye la venta: la misma llave aplicada a otra venta no es un reintento,
+        // es un error del cliente, y debe rechazarse en vez de repetir la respuesta ajena.
+        SaleResponse response = idempotencyService.run(
+                IdempotencyScope.PAYMENT_ADD,
+                idempotencyKey,
+                List.of(id, request),
+                () -> saleService.addPayment(id, request),
+                SaleResponse::getSaleId,
+                saleService::getSaleById);
+
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Devolución de mercancía de una venta (total o por partidas).
+     * Restringido a Dueño/Gerente en SecurityConfig: reingresa stock y saca dinero de la caja.
+     */
+    @PostMapping("/{id}/refunds")
+    public ResponseEntity<RefundResponse> createRefund(
+            @PathVariable Long id,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody RefundRequest request) {
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = auth.getName();
+
+        RefundResponse response = idempotencyService.run(
+                IdempotencyScope.SALE_REFUND,
+                idempotencyKey,
+                List.of(id, request),
+                () -> refundService.createRefund(id, request, username),
+                RefundResponse::getRefundId,
+                refundService::getRefundById);
+
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{id}/refunds")
+    public ResponseEntity<List<RefundResponse>> getRefunds(@PathVariable Long id) {
+        return ResponseEntity.ok(refundService.getRefundsBySale(id));
     }
 
     // --- NUEVO: ENDPOINT PATCH PARA CAMBIAR ESTADO ---

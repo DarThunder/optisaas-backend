@@ -6,6 +6,7 @@ import com.idar.optisaas.repository.*;
 import com.idar.optisaas.security.AttemptLimiter;
 import com.idar.optisaas.security.PinEncoder;
 import com.idar.optisaas.security.TenantContext;
+import com.idar.optisaas.util.AuditAction;
 import com.idar.optisaas.util.Role;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -27,6 +28,7 @@ public class UserService {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private AttemptLimiter attemptLimiter;
     @Autowired private PinEncoder pinEncoder;
+    @Autowired private AuditService auditService;
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int ACTIVATION_CODE_VALID_DAYS = 7;
@@ -93,7 +95,13 @@ public class UserService {
 
         user.setBranchRoles(Set.of(role));
 
-        return userRepository.save(user);
+        User created = userRepository.save(user);
+
+        auditService.log(AuditAction.EMPLOYEE_CREATED, "User", created.getId(),
+                "usuario: " + created.getUsername() + "; rol: " + newRole
+                        + "; sucursal: " + targetBranchId, targetBranchId);
+
+        return created;
     }
 
     // =======================================================================
@@ -114,7 +122,13 @@ public class UserService {
         target.setActivationCode(generateActivationCode());
         target.setActivationCodeExpiresAt(LocalDateTime.now().plusDays(ACTIVATION_CODE_VALID_DAYS));
 
-        return userRepository.save(target);
+        User saved = userRepository.save(target);
+
+        auditService.log(AuditAction.CREDENTIALS_RESET, "User", saved.getId(),
+                "se restableció el acceso de: " + saved.getUsername()
+                        + " (contraseña y PIN quedan pendientes de activación)");
+
+        return saved;
     }
 
     // =======================================================================
@@ -205,12 +219,24 @@ public class UserService {
         // define (al activar su cuenta); para renovarlos se usa resetCredentials().
 
         // Actualizar el rol en la sucursal correspondiente.
+        Role previousRole = target.getBranchRoles().stream()
+                .filter(r -> r.getBranch().getId().equals(branchToUpdate))
+                .findFirst()
+                .map(UserBranchRole::getRole)
+                .orElse(null);
+
         target.getBranchRoles().stream()
                 .filter(r -> r.getBranch().getId().equals(branchToUpdate))
                 .findFirst()
                 .ifPresent(r -> r.setRole(newRole));
 
-        return userRepository.save(target);
+        User saved = userRepository.save(target);
+
+        auditService.log(AuditAction.EMPLOYEE_UPDATED, "User", saved.getId(),
+                "usuario: " + saved.getUsername() + "; rol: " + previousRole + " -> " + newRole
+                        + "; sucursal: " + branchToUpdate, branchToUpdate);
+
+        return saved;
     }
 
     public User validateEmployeePin(Long id, String pin) {
@@ -240,6 +266,12 @@ public class UserService {
         }
 
         attemptLimiter.reset(key);
+
+        // El cambio de operador reemite la sesión con el rol del empleado destino:
+        // queda registrado quién cedió el turno a quién.
+        auditService.log(AuditAction.OPERATOR_SWITCHED, "User", user.getId(),
+                "operador entrante: " + user.getUsername() + " (" + user.getFullName() + ")");
+
         return user;
     }
 
@@ -256,6 +288,9 @@ public class UserService {
 
         target.setActive(false);
         userRepository.save(target);
+
+        auditService.log(AuditAction.EMPLOYEE_DEACTIVATED, "User", target.getId(),
+                "usuario desactivado: " + target.getUsername());
     }
 
     public List<User> getEmployeesByBranch(Long branchId) {

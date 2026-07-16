@@ -9,6 +9,7 @@ import com.idar.optisaas.entity.UserBranchRole;
 import com.idar.optisaas.repository.UserRepository;
 import com.idar.optisaas.security.AttemptLimiter;
 import com.idar.optisaas.security.PinEncoder;
+import com.idar.optisaas.util.AuditAction;
 import com.idar.optisaas.util.JwtUtils;
 import com.idar.optisaas.util.Role;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +37,9 @@ public class AuthService {
 
     @Autowired
     private PinEncoder pinEncoder;
+
+    @Autowired
+    private AuditService auditService;
 
     public ResponseCookie login(LoginRequest request) {
         String key = "login:" + safeKey(request.getIdentifier());
@@ -144,6 +148,11 @@ public class AuthService {
         }
 
         attemptLimiter.reset(key);
+
+        // Acción del Hub: sin sucursal (branchId null). El actor aún no está en el
+        // SecurityContext (la sesión FULL se emite después), por eso usamos logAs.
+        auditService.logAs(AuditAction.HUB_ACCESS_GRANTED, user, "User", user.getId(),
+                "acceso al panel de administrador global; rol: " + globalRole, null);
 
         return new AuthResponse(
                 "Acceso global concedido",

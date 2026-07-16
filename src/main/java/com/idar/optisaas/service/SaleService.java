@@ -2,6 +2,7 @@ package com.idar.optisaas.service;
 
 import com.idar.optisaas.entity.*;
 import com.idar.optisaas.util.*;
+import com.idar.optisaas.util.AuditAction;
 import com.idar.optisaas.dto.*;
 import com.idar.optisaas.repository.*;
 import com.idar.optisaas.security.TenantContext; 
@@ -27,6 +28,7 @@ public class SaleService {
     @Autowired private ClinicalRecordRepository clinicalRepository;
     @Autowired private BranchRepository branchRepository;
     @Autowired private UserBranchRoleRepository roleRepository;
+    @Autowired private AuditService auditService;
 
     // --- OBTENER TODAS LAS VENTAS ---
     public List<SaleResponse> getAllSales() {
@@ -206,7 +208,10 @@ public class SaleService {
     }
     
     private boolean shouldManageStock(Product product) {
-        return product.getType() == ProductType.FRAME || product.getType() == ProductType.ACCESSORY;
+        return StockPolicy.managesStock(product.getType());
+    }
+    private boolean isReturnStatus(SaleStatus status) {
+        return status == SaleStatus.RETURNED || status == SaleStatus.PARTIALLY_RETURNED;
     }
     private Product getManualSaleProduct(Branch branch, Long branchId) {
         String sku = "MANUAL-SALE-" + branchId;
@@ -242,18 +247,16 @@ public class SaleService {
         response.setPaidAmount(sale.getPaidAmount());
         response.setDiscountAmount(sale.getDiscountAmount());
         response.setDiscountName(sale.getDiscountName());
-        
-        if (sale.getRemainingBalance() != null) {
-             response.setRemainingBalance(sale.getRemainingBalance());
-        } else {
-             response.setRemainingBalance(sale.getTotalAmount().subtract(sale.getPaidAmount()));
-        }
-        
+        response.setReturnedAmount(sale.getReturnedAmount());
+        response.setRefundedAmount(sale.getRefundedAmount());
+        response.setRemainingBalance(sale.getRemainingBalance());
+
         // --- MAPEO DE ITEMS PARA VER DETALLES ---
         if (sale.getItems() != null) {
             List<SaleItemResponse> itemResponses = sale.getItems().stream()
                 .map(item -> {
                     SaleItemResponse ir = new SaleItemResponse();
+                    ir.setSaleItemId(item.getId());
                     ir.setProductId(item.getProduct().getId());
                     ir.setProductNameSnapshot(item.getProductNameSnapshot());
                     ir.setQuantity(item.getQuantity());
@@ -284,14 +287,31 @@ public class SaleService {
         Sale sale = saleRepository.findByIdAndBranchId(saleId, currentBranchId)
                 .orElseThrow(() -> new RuntimeException("Venta no encontrada o sin permisos"));
 
+        SaleStatus previousStatus = sale.getStatus();
+        SaleStatus status;
         try {
-            SaleStatus status = SaleStatus.valueOf(newStatusName);
-            sale.setStatus(status);
+            status = SaleStatus.valueOf(newStatusName);
         } catch (IllegalArgumentException e) {
             throw new RuntimeException("Estado inválido: " + newStatusName);
         }
 
+        // Los estados de devolución los fija RefundService junto con el stock, la caja y el
+        // rastro de auditoría. Ponerlos o quitarlos a mano dejaría el dinero descuadrado.
+        if (isReturnStatus(status)) {
+            throw new RuntimeException("El estado " + status + " se establece registrando una devolución, no a mano");
+        }
+        if (isReturnStatus(previousStatus)) {
+            throw new RuntimeException("Una venta con mercancía devuelta no puede cambiar de estado manualmente");
+        }
+
+        sale.setStatus(status);
+
         Sale savedSale = saleRepository.save(sale);
+
+        auditService.log(AuditAction.SALE_STATUS_CHANGED, "Sale", savedSale.getId(),
+                "estado: " + previousStatus + " -> " + savedSale.getStatus()
+                        + "; total: " + savedSale.getTotalAmount());
+
         return mapToResponse(savedSale);
     }
 
@@ -309,6 +329,7 @@ public class SaleService {
 
         if (sale.getStatus() == SaleStatus.CANCELLED) throw new RuntimeException("No se pueden agregar pagos a una venta cancelada");
         if (sale.getStatus() == SaleStatus.QUOTATION) throw new RuntimeException("Una cotización debe convertirse en venta antes de pagar");
+        if (sale.getStatus() == SaleStatus.RETURNED) throw new RuntimeException("No se pueden agregar pagos a una venta devuelta por completo");
 
         BigDecimal newBalance = sale.getRemainingBalance().subtract(paymentRequest.getAmount());
         
@@ -351,9 +372,16 @@ public class SaleService {
         }
 
         Sale savedSale = saleRepository.save(sale);
+
+        auditService.log(AuditAction.PAYMENT_ADDED, "Sale", savedSale.getId(),
+                "monto: " + paymentRequest.getAmount()
+                        + "; método: " + paymentRequest.getMethod()
+                        + "; pagado: " + savedSale.getPaidAmount() + "/" + savedSale.getTotalAmount()
+                        + "; estado: " + savedSale.getStatus());
+
         return mapToResponse(savedSale);
     }
-    
+
     // --- EXPIRAR COTIZACIONES VIEJAS (JOB PROGRAMADO) ---
     @Transactional
     public int expireOldQuotations(int daysOld) {
