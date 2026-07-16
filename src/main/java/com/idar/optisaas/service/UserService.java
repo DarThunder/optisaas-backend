@@ -38,7 +38,7 @@ public class UserService {
     // =======================================================================
     @Transactional
     public User createEmployee(EmployeeRequest request, String callerUsername, String callerRole) {
-        if (userRepository.findByEmailOrUsername(request.getUsername(), request.getEmail()).isPresent()) {
+        if (userRepository.findByEmailOrUsername(request.getEmail(), request.getUsername()).isPresent()) {
             throw new RuntimeException("El usuario ya existe (username o email duplicado)");
         }
 

@@ -38,10 +38,17 @@ public class AuthService {
     private PinEncoder pinEncoder;
 
     public ResponseCookie login(LoginRequest request) {
-        String key = "login:" + safeKey(request.getIdentifier());
+        String identifier = request.getIdentifier();
+        // Un identificador vacío no identifica a nadie: se corta antes de consultar y antes
+        // de contar el intento, para no gastar el presupuesto de reintentos de la clave "".
+        if (identifier == null || identifier.isBlank()) {
+            throw new RuntimeException("Debes indicar tu correo o usuario");
+        }
+
+        String key = "login:" + safeKey(identifier);
         attemptLimiter.assertNotBlocked(key);
 
-        User user = userRepository.findByEmailOrUsername(request.getIdentifier(), request.getIdentifier())
+        User user = userRepository.findByEmailOrUsername(identifier, identifier)
                 .orElse(null);
         if (user == null) {
             attemptLimiter.recordFailure(key);
