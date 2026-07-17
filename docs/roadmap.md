@@ -69,9 +69,27 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
 - **Fase 1:** ✅ terminada.
   - Flyway: `V1__baseline.sql` (esquema adoptado) + `V2__widen_quick_pin.sql`; `ddl-auto=validate`. Verificado en Docker (baseline en DB existente y creación en DB fresca).
   - CI/CD: `.github/workflows/ci.yml` (build + tests con Postgres de servicio).
+  - ⚠️ Ambas cosas estuvieron rotas entre el 15 y el 16 de julio de 2026 y se corrigieron
+    (ver "Trampas de la Fase 1"). El CI estuvo en rojo desde su creación hasta entonces.
   - Respaldos: `scripts/backup.sh` (dump comprimido + retención) y `scripts/restore.sh`.
   - Hardening: DB solo en `127.0.0.1`, `docker-compose.prod.yml` (sin puerto de DB, `restart: always`), `show-sql=false` por defecto.
   - Tests: +9 de regresión de seguridad (`AttemptLimiter`, `PinEncoder`). Total 17, en verde.
+
+#### Trampas de la Fase 1 que conviene recordar
+- **`pg_dump` >= 17 envuelve el volcado en `\restrict` / `\unrestrict`**, meta-comandos que solo
+  entiende el cliente `psql`. Flyway ejecuta el script por JDBC, donde un `\` inicial es un error
+  de sintaxis: `V1__baseline.sql` reventaba en cualquier BD vacía (CI, clon nuevo, `postgres-data`
+  borrado). No se notaba en las BD existentes porque ahí V1 es de tipo BASELINE —
+  `baseline-on-migrate=true` lo marca como adoptado sin ejecutarlo, y las filas BASELINE no
+  guardan checksum. Por eso editar V1 no rompió ninguna BD viva. Al regenerar el dump, borrar
+  esas dos líneas.
+- **`src/test/resources/application.properties` ocultaba al de `src/main`**: Maven pone
+  `target/test-classes` antes en el classpath, así que ese archivo NO complementa al de
+  producción, lo REEMPLAZA. El contexto quedaba sin `spring.datasource.url`, `contextLoads`
+  moría con "Failed to determine a suitable driver class" y las variables `DB_*` del workflow no
+  las leía nadie. Ahora es `application-test.properties` (perfil `test`, se carga encima del de
+  `src/main`) y `OptisaasApplicationTests` lleva `@ActiveProfiles("test")`. **Todo `@SpringBootTest`
+  nuevo debe llevarlo.**
 - **Fase 2:** ✅ terminada.
   - ✅ **Bitácora de auditoría**: entidad `AuditLog` (append-only, `branch_id` nullable para acciones de Hub),
     migración `V3__add_audit_log.sql`, `AuditService` (escritura, en la transacción del llamador) y

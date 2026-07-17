@@ -1,5 +1,9 @@
-
-\restrict dj7SNlvfothIA2Z5DabC5A4LSrULFGh05Plb1MWcAiMSblwtSOmZNF2jDmaLj1j
+-- Esquema adoptado como baseline (generado con pg_dump y ejecutado por Flyway vía JDBC).
+--
+-- OJO al regenerar este archivo: pg_dump >= 17 envuelve el volcado en los meta-comandos
+-- \restrict y \unrestrict, que solo entiende el cliente psql. Flyway manda el script por
+-- JDBC, donde un \ inicial es un error de sintaxis y la migración falla en una BD vacía.
+-- Si vuelves a volcar el esquema, elimina esas dos líneas.
 
 CREATE TABLE public.branch_settings (
     id bigint NOT NULL,
@@ -524,6 +528,4 @@ ALTER TABLE ONLY public.user_branch_roles
 
 ALTER TABLE ONLY public.sales
     ADD CONSTRAINT fkrhimhek4ehsu31ujgod41qnhx FOREIGN KEY (branch_id) REFERENCES public.branches(id);
-
-\unrestrict dj7SNlvfothIA2Z5DabC5A4LSrULFGh05Plb1MWcAiMSblwtSOmZNF2jDmaLj1j
 
