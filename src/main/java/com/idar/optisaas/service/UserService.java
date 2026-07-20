@@ -1,7 +1,9 @@
 package com.idar.optisaas.service;
 
+import com.idar.optisaas.dto.ActivationDelivery;
 import com.idar.optisaas.dto.EmployeeRequest;
 import com.idar.optisaas.entity.*;
+import com.idar.optisaas.mail.EmployeeActivationMailer;
 import com.idar.optisaas.repository.*;
 import com.idar.optisaas.security.AttemptLimiter;
 import com.idar.optisaas.security.PinEncoder;
@@ -29,6 +31,7 @@ public class UserService {
     @Autowired private AttemptLimiter attemptLimiter;
     @Autowired private PinEncoder pinEncoder;
     @Autowired private AuditService auditService;
+    @Autowired private EmployeeActivationMailer activationMailer;
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int ACTIVATION_CODE_VALID_DAYS = 7;
@@ -39,7 +42,7 @@ public class UserService {
     // aplicar el techo de rol y el aislamiento por sucursal/cuenta.
     // =======================================================================
     @Transactional
-    public User createEmployee(EmployeeRequest request, String callerUsername, String callerRole) {
+    public ActivationDelivery createEmployee(EmployeeRequest request, String callerUsername, String callerRole) {
         if (userRepository.findByEmailOrUsername(request.getEmail(), request.getUsername()).isPresent()) {
             throw new RuntimeException("El usuario ya existe (username o email duplicado)");
         }
@@ -101,7 +104,11 @@ public class UserService {
                 "usuario: " + created.getUsername() + "; rol: " + newRole
                         + "; sucursal: " + targetBranchId, targetBranchId);
 
-        return created;
+        // Si el empleado tiene correo, el código le llega solo; si no, el administrador se lo
+        // dicta como siempre. El envío ocurre al confirmarse la transacción (ver el mailer).
+        String sentTo = activationMailer.sendActivationCode(created, targetBranchId, false);
+
+        return new ActivationDelivery(created, sentTo);
     }
 
     // =======================================================================
@@ -109,7 +116,7 @@ public class UserService {
     // a definir su contraseña y PIN). Quien resetea NO conoce las nuevas claves.
     // =======================================================================
     @Transactional
-    public User resetCredentials(Long id, String callerUsername, String callerRole) {
+    public ActivationDelivery resetCredentials(Long id, String callerUsername, String callerRole) {
         User caller = getCaller(callerUsername);
         User target = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
@@ -128,7 +135,10 @@ public class UserService {
                 "se restableció el acceso de: " + saved.getUsername()
                         + " (contraseña y PIN quedan pendientes de activación)");
 
-        return saved;
+        String sentTo = activationMailer.sendActivationCode(
+                saved, activationMailer.primaryBranchId(saved), true);
+
+        return new ActivationDelivery(saved, sentTo);
     }
 
     // =======================================================================

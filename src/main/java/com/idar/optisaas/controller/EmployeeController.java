@@ -1,5 +1,6 @@
 package com.idar.optisaas.controller;
 
+import com.idar.optisaas.dto.ActivationDelivery;
 import com.idar.optisaas.dto.EmployeeRequest;
 import com.idar.optisaas.entity.User;
 import com.idar.optisaas.service.UserService;
@@ -161,14 +162,8 @@ public class EmployeeController {
     @PostMapping("/create")
     public ResponseEntity<?> createEmployee(@RequestBody EmployeeRequest request) {
         try {
-            User created = userService.createEmployee(request, currentUsername(), currentRole());
-            // El código de activación se devuelve UNA sola vez, para entregárselo al empleado.
-            return ResponseEntity.ok(Map.of(
-                    "id", created.getId(),
-                    "fullName", created.getFullName(),
-                    "username", created.getUsername(),
-                    "activationCode", created.getActivationCode()
-            ));
+            ActivationDelivery result = userService.createEmployee(request, currentUsername(), currentRole());
+            return ResponseEntity.ok(activationResponse(result));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
@@ -193,13 +188,8 @@ public class EmployeeController {
     @PostMapping("/{id}/reset-credentials")
     public ResponseEntity<?> resetCredentials(@PathVariable Long id) {
         try {
-            User user = userService.resetCredentials(id, currentUsername(), currentRole());
-            return ResponseEntity.ok(Map.of(
-                    "id", user.getId(),
-                    "fullName", user.getFullName(),
-                    "username", user.getUsername(),
-                    "activationCode", user.getActivationCode()
-            ));
+            ActivationDelivery result = userService.resetCredentials(id, currentUsername(), currentRole());
+            return ResponseEntity.ok(activationResponse(result));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
@@ -249,6 +239,25 @@ public class EmployeeController {
     }
 
     // ------------------------- Helpers -------------------------
+
+    /**
+     * Respuesta del alta / reseteo de un empleado.
+     *
+     * El código se sigue devolviendo aunque se haya mandado por correo: es el respaldo si el
+     * correo no llega (buzón lleno, spam, dirección mal capturada) y evita dejar al
+     * administrador sin forma de dar acceso. `activationCodeSentTo` le dice si hizo falta
+     * dictarlo o no. Se usa HashMap porque Map.of no admite valores null.
+     */
+    private Map<String, Object> activationResponse(ActivationDelivery result) {
+        User user = result.user();
+        Map<String, Object> body = new HashMap<>();
+        body.put("id", user.getId());
+        body.put("fullName", user.getFullName());
+        body.put("username", user.getUsername());
+        body.put("activationCode", user.getActivationCode());
+        body.put("activationCodeSentTo", result.sentTo());
+        return body;
+    }
 
     private String currentUsername() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
