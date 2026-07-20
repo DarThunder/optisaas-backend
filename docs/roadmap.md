@@ -164,7 +164,48 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   con `brand` + `model` (y el stock es `stockQuantity`). Es la misma composición que hace el backend
   al reportar ajustes; centralizada para no volver a asumir un `product.name` que no existe.
 
-- Fases 4–7: pendientes.
+- **Fase 4:** 🚧 infraestructura de correo y recuperación del dueño hechas; falta el resto.
+  - ✅ **Capa de correo** (`com.idar.optisaas.mail`): el proveedor es CONFIGURACIÓN, no código.
+    `MailSender` es un puerto con dos implementaciones que se eligen con `app.mail.provider`:
+    `LogMailSender` (por defecto; escribe el correo en el log en vez de enviarlo, para poder usar
+    y verificar los flujos sin dominio verificado) y `SmtpMailSender` (envío real; sirve con
+    Gmail, Brevo, SES o el del hosting vía `spring.mail.*`).
+    **`log` NO va en producción**: dejaría en los logs enlaces válidos para tomar una cuenta.
+  - ✅ **Recuperación de contraseña self-service del DUEÑO**: `POST /api/auth/forgot-password` y
+    `POST /api/auth/reset-password`, entidad `PasswordResetToken`, migración `V7`.
+    Solo el dueño: es quien contrata el servicio y tiene correo propio (hoy 6 de 9 usuarios no
+    tienen). A los empleados les restablece el acceso su administrador con el código de
+    activación que ya existía.
+  - Frontend: "¿Olvidaste tu contraseña?" en el login de administrador y pantalla de contraseña
+    nueva. El token llega por `/?reset-token=...` y se borra del historial al instante, para que
+    no quede en la barra de direcciones ni se filtre por `Referer`.
+  - Pendiente de la fase: activación de empleados por correo, envío de ticket/comprobante y
+    avisos al cliente ("su trabajo está listo").
+
+#### Decisiones de la Fase 4 que conviene recordar
+- **No se puede enviar "desde" el correo del cliente.** Poner su Gmail en el campo `De:` hace que
+  el correo se rechace o caiga en spam: el dominio declara por DNS (SPF/DKIM/DMARC) quién puede
+  enviar en su nombre, y nuestro servidor no está en esa lista. Para que un correo se vea de la
+  óptica: `De` = nuestro dominio verificado, **nombre visible** = `BranchSettings.businessName`,
+  y `Reply-To` = `BranchSettings.email`. El cliente ve la óptica y sus respuestas le llegan a ella.
+  `EmailMessage.fromBusiness(...)` ya lo soporta para cuando se hagan los correos al cliente final.
+  Guardar las credenciales SMTP de cada dueño se descartó: es almacenar la contraseña de correo
+  de un cliente para muy poco beneficio.
+- **Correos de plataforma vs. de la óptica**: los de la cuenta (recuperar contraseña) se ven como
+  OptiSaaS a propósito — si llegaran con la marca de la tienda del propio usuario, parecerían
+  phishing. Los que van al cliente final sí llevan la identidad de la sucursal.
+- **Del token solo se guarda el hash SHA-256.** Quien tenga el token puede tomar la cuenta: es un
+  secreto equivalente a una contraseña, y así un volcado de la base no entrega tokens usables.
+  Un solo uso, 1 hora de vigencia, pedir uno nuevo anula el anterior y cambiar la contraseña quema
+  todos los pendientes. El rol se revalida al canjear, no solo al pedir.
+- **`forgot-password` responde SIEMPRE lo mismo**, exista o no el correo y sea dueño o empleado.
+  Si variara, el endpoint serviría para averiguar qué correos tienen cuenta.
+- **`app.frontend.url` NO sirve para armar enlaces**: es la lista de orígenes permitidos para CORS
+  y su primer valor arrastraba un puerto viejo (5500), así que el enlace del correo apuntaba a
+  donde la app ya no vive. Los enlaces usan `app.frontend.publicUrl` (`FRONTEND_PUBLIC_URL`).
+  Se detectó ejecutando el flujo, no leyendo el código; hay test de regresión.
+
+- Fases 5–7: pendientes.
 
 ### Frontend de la Fase 2 — ✅ hecho
 - `src/features/utils/api.js`: `newIdempotencyKey()` (UUID; con respaldo para contextos no seguros,
