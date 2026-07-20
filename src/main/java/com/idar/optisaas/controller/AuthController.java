@@ -3,6 +3,7 @@ package com.idar.optisaas.controller;
 import com.idar.optisaas.dto.*;
 import com.idar.optisaas.util.JwtUtils;
 import com.idar.optisaas.service.AuthService;
+import com.idar.optisaas.service.PasswordResetService;
 import com.idar.optisaas.service.UserService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,6 +24,7 @@ public class AuthController {
     @Autowired private AuthService authService;
     @Autowired private JwtUtils jwtUtils;
     @Autowired private UserService userService;
+    @Autowired private PasswordResetService passwordResetService;
 
     // Activación de cuenta (primer ingreso): el empleado define su propia contraseña
     // y PIN con el código de un solo uso. Público: aún no tiene credenciales para login.
@@ -70,6 +72,27 @@ public class AuthController {
                     .body("Paso 1 completado. Seleccione sucursal.");
         } catch (RuntimeException e) {
             return ResponseEntity.status(401).body(e.getMessage());
+        }
+    }
+
+    // Recuperación de contraseña del DUEÑO (los empleados los restablece su administrador).
+    //
+    // Responde SIEMPRE lo mismo, exista o no el correo y sea o no de un dueño: si la respuesta
+    // cambiara, cualquiera podría usar este endpoint para averiguar qué correos tienen cuenta.
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        passwordResetService.requestReset(request.getEmail());
+        return ResponseEntity.ok(Map.of(
+                "message", "Si el correo corresponde a una cuenta de administrador, te enviamos un enlace para restablecer tu contraseña."));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        try {
+            passwordResetService.completeReset(request.getToken(), request.getNewPassword());
+            return ResponseEntity.ok(Map.of("message", "Contraseña actualizada. Ya puedes iniciar sesión."));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
     }
 

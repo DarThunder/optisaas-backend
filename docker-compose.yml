@@ -14,6 +14,15 @@ services:
       DDL_AUTO: ${DDL_AUTO:-validate}
       SEED_ENABLED: ${SEED_ENABLED:-true}
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # URL para los enlaces dentro de los correos (distinta de la lista de CORS de arriba).
+      FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-log}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@optisaas.local}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-OptiSaaS}
+      MAIL_HOST: ${MAIL_HOST:-smtp.example.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
     depends_on:
       postgres-db:
         condition: service_healthy
