@@ -115,7 +115,7 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
     la devolución baja la deuda sin mover la caja. Auditada con `SALE_REFUNDED`.
     Verificada end-to-end en Docker (reintento devuelve la misma venta sin duplicar stock,
     devolución parcial y total, tope de piezas, arqueo y bitácora). Tests: 36 en verde.
-- **Fase 3:** 🚧 backend terminado y verificado; falta el frontend.
+- **Fase 3:** ✅ terminada (backend y frontend verificados end-to-end).
   - ✅ **Proveedores**: `Supplier` (por sucursal, con baja lógica para no perder el historial de
     compras), CRUD en `/api/suppliers`, solo Dueño/Gerente.
   - ✅ **Órdenes de compra**: `PurchaseOrder`/`PurchaseOrderItem`, migración `V6`, estados
@@ -141,11 +141,28 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   de promediar contra cero, que dejaría el inventario valuado en casi nada. Efecto a tener en
   cuenta: la primera recepción de un producto histórico cambia su valuación de golpe.
 
-### Frontend pendiente (Fase 3)
-- Vista de Compras: catálogo de proveedores y órdenes (crear, confirmar, recibir con captura de
-  lo que realmente llegó y su costo de factura, cancelar). Mandar `Idempotency-Key` al recibir.
-- Ajustes desde Inventario: botón por producto con motivo, cantidad/conteo y nota, más el
-  historial de mermas.
+### Frontend de la Fase 3 — ✅ hecho
+- **Vista de Compras** (`src/features/purchases/`): pestaña nueva `purchases` en `ROLE_TABS`, solo
+  OWNER/MANAGER — es lo que exige `SecurityConfig` para `/api/suppliers`, `/api/purchase-orders` e
+  `/api/inventory-adjustments`.
+  - `SuppliersSection` + `SupplierModal`: alta, edición y baja lógica (los inactivos se ocultan
+    por defecto y se pueden reactivar; el aviso deja claro que no se pierde el historial).
+  - `PurchaseOrdersSection`: filtros por estado, detalle desplegable con lo pedido vs. lo recibido,
+    y las acciones según estado (confirmar en DRAFT, recibir en ORDERED/PARTIALLY_RECEIVED,
+    cancelar mientras no esté RECEIVED/CANCELLED).
+  - `PurchaseOrderModal`: al elegir producto propone su costo actual, salvo que sea 0 — ahí deja el
+    campo vacío, porque 0 es "no capturado" y mandarlo sería falsear la valuación.
+  - `ReceiveModal`: precarga lo pendiente al costo pactado y permite corregir cantidad y costo real
+    de factura. `Idempotency-Key` generada al ABRIR el modal (la intención, no el clic) y quemada
+    al concretarse: el doble clic no suma stock dos veces.
+- **Ajustes desde Inventario**: `AdjustStockModal` con los dos modos que acepta el backend
+  (movimiento `delta` / conteo físico `newQuantity`, exactamente uno), vista previa del stock
+  resultante, motivo de lista cerrada y aviso de que el ajuste no se deshace. `AdjustmentHistoryModal`
+  por producto o global (botón "Mermas"), con filtro por motivo, paginación y el valor de la pérdida
+  calculado con el costo congelado.
+- `src/features/utils/product.js`: `productLabel()`. Un `Product` NO tiene campo `name`: se identifica
+  con `brand` + `model` (y el stock es `stockQuantity`). Es la misma composición que hace el backend
+  al reportar ajustes; centralizada para no volver a asumir un `product.name` que no existe.
 
 - Fases 4–7: pendientes.
 
@@ -165,3 +182,5 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
 **Pendiente:** volver `Idempotency-Key` obligatorio en el backend. Ya se puede hacer, pero solo
 después de confirmar que el frontend nuevo está desplegado y sin bundles viejos en caché: si un
 cliente sin actualizar sigue cobrando sin el header, empezaría a recibir 400 en cada venta.
+El frontend ya está commiteado (Fases 2 y 3), así que ahora esto depende solo del despliegue.
+Al activarlo, cubrir también el scope `PURCHASE_RECEIPT` de la recepción de compras.
