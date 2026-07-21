@@ -1,4 +1,11 @@
-# OptiSaaS — Roadmap a producto profesional
+# Fóvea — Roadmap a producto profesional
+
+> **Nombre:** el producto es **Fóvea** (dominio `fovea.com.mx`); **VLK** es el estudio que lo
+> desarrolla y aparece solo en el pie de los correos y en "acerca de" — la relación del cliente es
+> con el producto. El nombre vive en `app.brand.name` (backend) y `src/features/utils/brand.js`
+> (frontend): cambiarlo es editar esos dos valores, no perseguirlo por el código.
+> Los paquetes Java siguen siendo `com.idar.optisaas` a propósito: renombrarlos toca todo el
+> proyecto, tiene riesgo real y el cliente nunca los ve.
 
 > Complemento de [security-audit.md](security-audit.md). La seguridad ya quedó cerrada;
 > este documento planifica el resto (operación, integridad financiera, features y SaaS).
@@ -199,7 +206,7 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   Guardar las credenciales SMTP de cada dueño se descartó: es almacenar la contraseña de correo
   de un cliente para muy poco beneficio.
 - **Correos de plataforma vs. de la óptica**: los de la cuenta (recuperar contraseña) se ven como
-  OptiSaaS a propósito — si llegaran con la marca de la tienda del propio usuario, parecerían
+  Fóvea a propósito — si llegaran con la marca de la tienda del propio usuario, parecerían
   phishing. Los que van al cliente final sí llevan la identidad de la sucursal.
 - **Del token solo se guarda el hash SHA-256.** Quien tenga el token puede tomar la cuenta: es un
   secreto equivalente a una contraseña, y así un volcado de la base no entrega tokens usables.
@@ -208,8 +215,8 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
 - **`forgot-password` responde SIEMPRE lo mismo**, exista o no el correo y sea dueño o empleado.
   Si variara, el endpoint serviría para averiguar qué correos tienen cuenta.
 - **El correo de activación del empleado no es ni de plataforma ni de la óptica**, así que el
-  nombre visible es «Negocio» **vía OptiSaaS**. Solo el negocio tendría forma de phishing (un
-  correo que aparenta venir de la tienda y pide definir una contraseña); solo OptiSaaS dejaría al
+  nombre visible es «Negocio» **vía Fóvea**. Solo el negocio tendría forma de phishing (un
+  correo que aparenta venir de la tienda y pide definir una contraseña); solo Fóvea dejaría al
   empleado sin saber quién lo dio de alta, pudiendo trabajar en varias ópticas. El `Reply-To` va
   a la óptica, que es quien puede ayudarlo. Si la sucursal no tiene ajustes, se cae a un genérico
   antes que mandar un correo sin firmar.
@@ -221,6 +228,13 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   cuenta que no existe. Ojo al tocar esto: los tests unitarios del mailer corren SIN transacción y
   por lo tanto ejercitan el envío inmediato, no el camino de producción — por eso existe
   `EmployeeActivationMailerTransactionTest`, que sí lo cubre (commit y rollback).
+- **El frontend fabricaba correos falsos.** Al dar de alta un empleado sin correo generaba
+  `usuario@optisaas.com`, un buzón inexistente. Con la activación por correo eso se volvió un
+  fallo silencioso: el sistema creía que el empleado tenía correo, mandaba el código a la nada y
+  le decía al administrador "ya se lo enviamos", así que nadie se lo dictaba y el empleado quedaba
+  sin poder activarse. Ahora se manda `null` — que es lo que dispara el camino manual — y `null`
+  y no `''` porque la columna es única y dos cadenas vacías chocarían. Si aparecen registros con
+  `@optisaas.com`, son de antes: hay que ponerlos en NULL.
 - **`app.frontend.url` NO sirve para armar enlaces**: es la lista de orígenes permitidos para CORS
   y su primer valor arrastraba un puerto viejo (5500), así que el enlace del correo apuntaba a
   donde la app ya no vive. Los enlaces usan `app.frontend.publicUrl` (`FRONTEND_PUBLIC_URL`).
