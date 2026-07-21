@@ -6,6 +6,7 @@ import com.idar.optisaas.entity.User;
 import com.idar.optisaas.entity.UserBranchRole;
 import com.idar.optisaas.mail.EmailMessage;
 import com.idar.optisaas.mail.MailSender;
+import com.idar.optisaas.mail.MailTemplates;
 import com.idar.optisaas.repository.PasswordResetTokenRepository;
 import com.idar.optisaas.repository.UserRepository;
 import com.idar.optisaas.security.AttemptLimiter;
@@ -44,6 +45,8 @@ class PasswordResetServiceTest {
         auditService = mock(AuditService.class);
 
         service = new PasswordResetService();
+        // Plantillas reales (no mock): las pruebas verifican el CONTENIDO del correo.
+        setField("mailTemplates", new MailTemplates("Fóvea", "VLK"));
         setField("userRepository", userRepository);
         setField("tokenRepository", tokenRepository);
         setField("passwordEncoder", passwordEncoder);

@@ -179,8 +179,15 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   - Frontend: "¿Olvidaste tu contraseña?" en el login de administrador y pantalla de contraseña
     nueva. El token llega por `/?reset-token=...` y se borra del historial al instante, para que
     no quede en la barra de direcciones ni se filtre por `Referer`.
-  - Pendiente de la fase: activación de empleados por correo, envío de ticket/comprobante y
-    avisos al cliente ("su trabajo está listo").
+  - ✅ **Activación de empleados por correo**: al dar de alta o resetear el acceso, si el empleado
+    tiene correo capturado el código le llega solo (`EmployeeActivationMailer`); si no, el
+    administrador lo ve en pantalla y se lo dicta, como siempre. Hoy 6 de 9 usuarios no tienen
+    correo, así que el camino manual NO se eliminó. `createEmployee` y `resetCredentials` devuelven
+    `ActivationDelivery` (usuario + a qué correo se envió, o null) para que la interfaz diga
+    cuál de los dos caminos ocurrió.
+  - Pendiente de la fase: envío de ticket/comprobante por correo y avisos al cliente
+    ("su trabajo está listo"). Ambos usan la identidad de sucursal (`EmailMessage.fromBusiness`),
+    que ya está en uso por el correo de activación.
 
 #### Decisiones de la Fase 4 que conviene recordar
 - **No se puede enviar "desde" el correo del cliente.** Poner su Gmail en el campo `De:` hace que
@@ -200,6 +207,20 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   todos los pendientes. El rol se revalida al canjear, no solo al pedir.
 - **`forgot-password` responde SIEMPRE lo mismo**, exista o no el correo y sea dueño o empleado.
   Si variara, el endpoint serviría para averiguar qué correos tienen cuenta.
+- **El correo de activación del empleado no es ni de plataforma ni de la óptica**, así que el
+  nombre visible es «Negocio» **vía OptiSaaS**. Solo el negocio tendría forma de phishing (un
+  correo que aparenta venir de la tienda y pide definir una contraseña); solo OptiSaaS dejaría al
+  empleado sin saber quién lo dio de alta, pudiendo trabajar en varias ópticas. El `Reply-To` va
+  a la óptica, que es quien puede ayudarlo. Si la sucursal no tiene ajustes, se cae a un genérico
+  antes que mandar un correo sin firmar.
+- **El código se sigue mostrando aunque se haya enviado por correo.** Sin ese respaldo, un correo
+  en spam o una dirección mal capturada dejaría al empleado sin acceso y al administrador sin
+  salida. El texto de la interfaz cambia según el caso.
+- **Los correos salen DESPUÉS del commit** (`TransactionSynchronization.afterCommit`): enviarlos
+  dentro de la transacción haría que, si esta falla después, el empleado reciba un código de una
+  cuenta que no existe. Ojo al tocar esto: los tests unitarios del mailer corren SIN transacción y
+  por lo tanto ejercitan el envío inmediato, no el camino de producción — por eso existe
+  `EmployeeActivationMailerTransactionTest`, que sí lo cubre (commit y rollback).
 - **`app.frontend.url` NO sirve para armar enlaces**: es la lista de orígenes permitidos para CORS
   y su primer valor arrastraba un puerto viejo (5500), así que el enlace del correo apuntaba a
   donde la app ya no vive. Los enlaces usan `app.frontend.publicUrl` (`FRONTEND_PUBLIC_URL`).

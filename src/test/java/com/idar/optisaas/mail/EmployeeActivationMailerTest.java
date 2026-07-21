@@ -33,6 +33,7 @@ class EmployeeActivationMailerTest {
 
         mailer = new EmployeeActivationMailer();
         setField("mailSender", mailSender);
+        setField("mailTemplates", new MailTemplates("Fóvea", "VLK"));
         setField("branchSettingsRepository", settingsRepository);
 
         BranchSettings settings = new BranchSettings();
@@ -90,7 +91,7 @@ class EmployeeActivationMailerTest {
         mailer.sendActivationCode(employee("ana@correo.com"), BRANCH_ID, false);
 
         EmailMessage sent = captureSent();
-        assertEquals("Óptica Vista Clara vía OptiSaaS", sent.fromName());
+        assertEquals("Óptica Vista Clara vía Fóvea", sent.fromName());
         assertEquals("hola@vistaclara.mx", sent.replyTo());
         assertTrue(sent.subject().contains("Óptica Vista Clara"));
     }
@@ -105,7 +106,7 @@ class EmployeeActivationMailerTest {
 
         assertEquals("ana@correo.com", sentTo);
         EmailMessage sent = captureSent();
-        assertEquals("Tu óptica vía OptiSaaS", sent.fromName());
+        assertEquals("Tu óptica vía Fóvea", sent.fromName());
         assertNull(sent.replyTo());
     }
 

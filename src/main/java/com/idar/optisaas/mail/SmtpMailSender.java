@@ -33,7 +33,7 @@ public class SmtpMailSender implements MailSender {
 
     public SmtpMailSender(JavaMailSender javaMailSender,
                           @Value("${app.mail.from}") String fromAddress,
-                          @Value("${app.mail.fromName:OptiSaaS}") String defaultFromName) {
+                          @Value("${app.mail.fromName:${app.brand.name}}") String defaultFromName) {
         this.javaMailSender = javaMailSender;
         this.fromAddress = fromAddress;
         this.defaultFromName = defaultFromName;

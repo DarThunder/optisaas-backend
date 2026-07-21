@@ -2,6 +2,7 @@ package com.idar.optisaas.mail;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -22,7 +23,10 @@ public class LogMailSender implements MailSender {
 
     private static final Logger log = LoggerFactory.getLogger(LogMailSender.class);
 
-    public LogMailSender() {
+    private final String brand;
+
+    public LogMailSender(@Value("${app.brand.name}") String brand) {
+        this.brand = brand;
         log.warn("=== CORREO EN MODO 'log': los correos NO se envían, se escriben aquí. " +
                 "Configura app.mail.provider=smtp para enviarlos de verdad. ===");
     }
@@ -41,7 +45,7 @@ public class LogMailSender implements MailSender {
                 ===============================================================
                 """,
                 message.to(),
-                message.fromName() != null ? message.fromName() : "OptiSaaS",
+                message.fromName() != null ? message.fromName() : brand,
                 message.replyTo() != null ? message.replyTo() : "(sin respuesta)",
                 message.subject(),
                 message.textBody());

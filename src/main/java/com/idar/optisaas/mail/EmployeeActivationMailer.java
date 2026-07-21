@@ -26,6 +26,7 @@ public class EmployeeActivationMailer {
     private static final Logger log = LoggerFactory.getLogger(EmployeeActivationMailer.class);
 
     @Autowired private MailSender mailSender;
+    @Autowired private MailTemplates mailTemplates;
     @Autowired private BranchSettingsRepository branchSettingsRepository;
 
     /**
@@ -40,7 +41,7 @@ public class EmployeeActivationMailer {
         }
 
         Identity identity = resolveIdentity(branchId);
-        EmailMessage message = MailTemplates.employeeActivation(
+        EmailMessage message = mailTemplates.employeeActivation(
                 to,
                 employee.getFullName(),
                 employee.getUsername(),

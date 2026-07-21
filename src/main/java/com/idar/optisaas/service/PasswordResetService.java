@@ -50,6 +50,7 @@ public class PasswordResetService {
     @Autowired private PasswordResetTokenRepository tokenRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private MailSender mailSender;
+    @Autowired private MailTemplates mailTemplates;
     @Autowired private AttemptLimiter attemptLimiter;
     @Autowired private AuditService auditService;
 
@@ -110,7 +111,7 @@ public class PasswordResetService {
         tokenRepository.save(token);
 
         String link = buildResetLink(rawToken);
-        EmailMessage message = MailTemplates.passwordReset(user.getEmail(), user.getFullName(), link, TOKEN_VALID_MINUTES);
+        EmailMessage message = mailTemplates.passwordReset(user.getEmail(), user.getFullName(), link, TOKEN_VALID_MINUTES);
         mailSender.send(message);
 
         auditService.logAs(AuditAction.PASSWORD_RESET_REQUESTED, user, "User", user.getId(),
