@@ -192,9 +192,14 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
     correo, así que el camino manual NO se eliminó. `createEmployee` y `resetCredentials` devuelven
     `ActivationDelivery` (usuario + a qué correo se envió, o null) para que la interfaz diga
     cuál de los dos caminos ocurrió.
-  - Pendiente de la fase: envío de ticket/comprobante por correo y avisos al cliente
-    ("su trabajo está listo"). Ambos usan la identidad de sucursal (`EmailMessage.fromBusiness`),
-    que ya está en uso por el correo de activación.
+  - ✅ **Avisos al cliente ("su trabajo está listo")**: botón de WhatsApp y de SMS en el tablero de
+    seguimiento, sobre las órdenes en `READY_TO_PICK`. **No usa la API de WhatsApp**: abre `wa.me`
+    con el mensaje ya escrito para que quien atiende lo revise y lo mande desde el número de la
+    óptica. Sin costo, sin aprobación de Meta, y por el canal que el cliente sí lee — en la base
+    hay más clientes con teléfono que con correo, así que el correo habría alcanzado a muy pocos.
+    El mensaje se firma con `businessName` de los ajustes de la sucursal.
+  - Pendiente de la fase: envío de ticket/comprobante por correo, que usa la identidad de
+    sucursal (`EmailMessage.fromBusiness`), ya en uso por el correo de activación.
 
 #### Decisiones de la Fase 4 que conviene recordar
 - **No se puede enviar "desde" el correo del cliente.** Poner su Gmail en el campo `De:` hace que
@@ -228,6 +233,13 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   cuenta que no existe. Ojo al tocar esto: los tests unitarios del mailer corren SIN transacción y
   por lo tanto ejercitan el envío inmediato, no el camino de producción — por eso existe
   `EmployeeActivationMailerTransactionTest`, que sí lo cubre (commit y rollback).
+- **`wa.me` exige el número con lada de país, sin `+`.** Los teléfonos se capturan en formato
+  local (10 dígitos: "228 212 2440"), así que mandarlos pelados abría un chat equivocado o
+  ninguno — el aviso al cliente no funcionaba para el caso normal. La normalización vive en
+  `src/features/utils/phone.js` y cubre los formatos que aparecen en la práctica: 10 dígitos,
+  con `+52`, con `52`, el heredado `521` de móvil (WhatsApp ya no quiere ese 1) y números de
+  otro país. Los de menos de 10 dígitos se rechazan con un aviso en vez de generar un enlace
+  roto en silencio. Para SMS **no** se aplica: un SMS nacional va al número tal como se capturó.
 - **El frontend fabricaba correos falsos.** Al dar de alta un empleado sin correo generaba
   `usuario@optisaas.com`, un buzón inexistente. Con la activación por correo eso se volvió un
   fallo silencioso: el sistema creía que el empleado tenía correo, mandaba el código a la nada y
