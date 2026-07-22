@@ -3,6 +3,10 @@ package com.idar.optisaas.mail;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.format.DateTimeFormatter;
+
 /**
  * Plantillas de los correos. Se arman aquí, en un solo lugar, para que el texto que ve el
  * cliente no quede disperso entre los servicios.
@@ -17,6 +21,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class MailTemplates {
+
+    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
     private final String brand;
     private final String maker;
@@ -152,5 +158,126 @@ public class MailTemplates {
                               name, intro, username, activationCode, brand, signature());
 
         return EmailMessage.fromBusiness(to, subject, html, text, displayName, businessEmail);
+    }
+
+    /**
+     * Comprobante de compra para el cliente final.
+     *
+     * Este SÍ va con la identidad de la óptica y sin mencionar la marca: al cliente le compró a
+     * su óptica, no a nosotros. Es la diferencia con el correo de activación, donde el empleado
+     * necesita saber que hay una plataforma detrás.
+     *
+     * No es un comprobante fiscal: eso es la Fase 5 (CFDI). El pie lo deja claro para que nadie
+     * lo confunda con una factura.
+     */
+    public EmailMessage saleReceipt(String to, ReceiptData r) {
+        ReceiptData.Business b = r.business();
+        String business = (b.name() == null || b.name().isBlank()) ? "Tu óptica" : b.name();
+        String saludo = (r.clientName() == null || r.clientName().isBlank()) ? "Hola" : "Hola " + r.clientName();
+        String fecha = r.date() == null ? "" : r.date().format(DATE_FORMAT);
+
+        StringBuilder lineasTexto = new StringBuilder();
+        StringBuilder lineasHtml = new StringBuilder();
+        for (ReceiptData.Line line : r.lines()) {
+            lineasTexto.append("  %d x %s%s%s%n".formatted(
+                    line.quantity(), line.description(),
+                    " ".repeat(Math.max(1, 28 - line.description().length())),
+                    money(line.subtotal())));
+            lineasHtml.append("""
+                    <tr>
+                      <td style="padding:6px 0;border-bottom:1px solid #f1f5f9">%s<br><span style="color:#94a3b8;font-size:12px">%d × %s</span></td>
+                      <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:right;white-space:nowrap">%s</td>
+                    </tr>
+                    """.formatted(esc(line.description()), line.quantity(), money(line.unitPrice()), money(line.subtotal())));
+        }
+
+        String totalesTexto = new StringBuilder()
+                .append(r.hasDiscount() ? "  Descuento%s: -%s%n".formatted(
+                        r.discountName() != null ? " (" + r.discountName() + ")" : "", money(r.discount())) : "")
+                .append("  TOTAL: %s%n".formatted(money(r.total())))
+                .append("  Pagado: %s%n".formatted(money(r.paid())))
+                .append(r.hasBalance() ? "  SALDO PENDIENTE: %s%n".formatted(money(r.balance())) : "")
+                .toString();
+
+        String text = """
+                %s,
+
+                Gracias por tu compra en %s.
+
+                Comprobante #%d
+                %s
+
+                %s
+                %s
+                %s%s%s
+
+                Este comprobante es informativo y no tiene validez fiscal.
+                """.formatted(saludo, business, r.folio(), fecha,
+                              lineasTexto.toString().stripTrailing(), totalesTexto,
+                              b.footerMessage() != null ? b.footerMessage() + "\n" : "",
+                              b.phone() != null ? "Tel. " + b.phone() + "\n" : "",
+                              b.legalNote() != null ? "\n" + b.legalNote() + "\n" : "");
+
+        String html = """
+                <div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#334155">
+                  <div style="text-align:center;margin:0 0 20px">
+                    <h2 style="color:#0f172a;font-size:20px;margin:0 0 4px">%s</h2>
+                    <p style="margin:0;color:#94a3b8;font-size:13px">%s%s</p>
+                  </div>
+                  <p style="margin:0 0 16px">%s, gracias por tu compra.</p>
+                  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:0 0 16px">
+                    <p style="margin:0 0 2px;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase">Comprobante</p>
+                    <p style="margin:0 0 12px;font-family:monospace;font-weight:700;color:#334155">#%d · %s</p>
+                    <table style="width:100%%;border-collapse:collapse;font-size:14px">%s</table>
+                    <table style="width:100%%;border-collapse:collapse;font-size:14px;margin-top:12px">
+                      %s
+                      <tr><td style="padding:4px 0;font-weight:700">Total</td><td style="padding:4px 0;text-align:right;font-weight:700">%s</td></tr>
+                      <tr><td style="padding:4px 0;color:#64748b">Pagado</td><td style="padding:4px 0;text-align:right;color:#64748b">%s</td></tr>
+                      %s
+                    </table>
+                  </div>
+                  %s
+                  <hr style="border:0;border-top:1px solid #e2e8f0;margin:20px 0">
+                  <p style="margin:0 0 4px;font-size:12px;color:#94a3b8">%s</p>
+                  <p style="margin:0;font-size:11px;color:#cbd5e1">Este comprobante es informativo y no tiene validez fiscal.</p>
+                </div>
+                """.formatted(
+                        esc(business),
+                        b.addressLine() != null ? esc(b.addressLine()) : "",
+                        b.phone() != null ? " · Tel. " + esc(b.phone()) : "",
+                        esc(saludo),
+                        r.folio(), fecha,
+                        lineasHtml.toString(),
+                        r.hasDiscount()
+                                ? "<tr><td style=\"padding:4px 0;color:#64748b\">Descuento%s</td><td style=\"padding:4px 0;text-align:right;color:#059669\">-%s</td></tr>"
+                                    .formatted(r.discountName() != null ? " (" + esc(r.discountName()) + ")" : "", money(r.discount()))
+                                : "",
+                        money(r.total()),
+                        money(r.paid()),
+                        r.hasBalance()
+                                ? "<tr><td style=\"padding:4px 0;font-weight:700;color:#b45309\">Saldo pendiente</td><td style=\"padding:4px 0;text-align:right;font-weight:700;color:#b45309\">%s</td></tr>".formatted(money(r.balance()))
+                                : "",
+                        b.footerMessage() != null ? "<p style=\"margin:0;text-align:center;color:#64748b\">" + esc(b.footerMessage()) + "</p>" : "",
+                        b.legalNote() != null ? esc(b.legalNote()) : "");
+
+        return EmailMessage.fromBusiness(to, "Tu comprobante de " + business + " (#" + r.folio() + ")",
+                html, text, business, b.email());
+    }
+
+    private static String money(BigDecimal amount) {
+        return "$" + (amount == null ? BigDecimal.ZERO : amount).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Escapa el HTML de los datos que escribe el usuario (nombre del negocio, descripciones de
+     * producto, notas). Sin esto, un `<` en el nombre de un producto rompería el correo, y un
+     * texto malicioso podría inyectar marcado en el mensaje que recibe el cliente.
+     */
+    private static String esc(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\"", "&quot;");
     }
 }

@@ -5,7 +5,8 @@ import com.idar.optisaas.util.*;
 import com.idar.optisaas.util.AuditAction;
 import com.idar.optisaas.dto.*;
 import com.idar.optisaas.repository.*;
-import com.idar.optisaas.security.TenantContext; 
+import com.idar.optisaas.mail.SaleReceiptMailer;
+import com.idar.optisaas.security.TenantContext;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ public class SaleService {
     @Autowired private BranchRepository branchRepository;
     @Autowired private UserBranchRoleRepository roleRepository;
     @Autowired private AuditService auditService;
+    @Autowired private SaleReceiptMailer receiptMailer;
 
     // --- OBTENER TODAS LAS VENTAS ---
     public List<SaleResponse> getAllSales() {
@@ -239,6 +241,9 @@ public class SaleService {
         if (sale.getClient() != null) {
             response.setClientName(sale.getClient().getFullName());
             response.setClientPhone(sale.getClient().getPhone());
+            // Lo usa el envío de comprobante para proponer el correo ya registrado en vez de
+            // pedir que lo dicten otra vez.
+            response.setClientEmail(sale.getClient().getEmail());
         } else {
             response.setClientName("Cliente General");
         }
@@ -405,5 +410,44 @@ public class SaleService {
         return sales.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    // =======================================================================
+    // ENVIAR COMPROBANTE POR CORREO
+    // Lo pide quien atiende, no se dispara solo: mandarle un correo a alguien porque compró,
+    // sin que lo pidiera, es correo no solicitado.
+    // =======================================================================
+    @Transactional
+    public String sendReceipt(Long saleId, String requestedEmail) {
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new RuntimeException("Venta no encontrada"));
+
+        Long currentBranchId = TenantContext.getCurrentBranch();
+        if (currentBranchId != null && !currentBranchId.equals(sale.getBranchId())) {
+            throw new RuntimeException("Esa venta no pertenece a esta sucursal");
+        }
+
+        Client client = sale.getClient();
+        String to = (requestedEmail != null && !requestedEmail.isBlank())
+                ? requestedEmail.trim()
+                : (client != null ? client.getEmail() : null);
+
+        if (to == null || to.isBlank()) {
+            throw new RuntimeException("No hay a qué correo enviarlo. Captura uno.");
+        }
+        if (!to.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+            throw new RuntimeException("El correo no tiene un formato válido");
+        }
+
+        // Si el cliente aún no tenía correo, se aprovecha para guardarlo: así la próxima vez ya
+        // está y la base de correos crece sola. NO se sobrescribe uno existente desde aquí:
+        // cambiar el correo de un cliente es otra operación, con su propia pantalla.
+        if (client != null && (client.getEmail() == null || client.getEmail().isBlank())) {
+            client.setEmail(to);
+            clientRepository.save(client);
+        }
+
+        receiptMailer.sendReceipt(sale, to);
+        return to;
     }
 }

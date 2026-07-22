@@ -171,7 +171,10 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   con `brand` + `model` (y el stock es `stockQuantity`). Es la misma composición que hace el backend
   al reportar ajustes; centralizada para no volver a asumir un `product.name` que no existe.
 
-- **Fase 4:** 🚧 infraestructura de correo y recuperación del dueño hechas; falta el resto.
+- **Fase 4:** ✅ construida y verificada, **pero el correo aún no sale de verdad**: falta el
+  dominio propio, así que `app.mail.provider` sigue en `log` (los correos se escriben en el
+  registro del servidor, no se envían). Al comprar el dominio: `MAIL_PROVIDER=smtp`, credenciales
+  del proveedor y verificar SPF/DKIM. Hasta entonces la fase está hecha en código, no en operación.
   - ✅ **Capa de correo** (`com.idar.optisaas.mail`): el proveedor es CONFIGURACIÓN, no código.
     `MailSender` es un puerto con dos implementaciones que se eligen con `app.mail.provider`:
     `LogMailSender` (por defecto; escribe el correo en el log en vez de enviarlo, para poder usar
@@ -198,8 +201,13 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
     óptica. Sin costo, sin aprobación de Meta, y por el canal que el cliente sí lee — en la base
     hay más clientes con teléfono que con correo, así que el correo habría alcanzado a muy pocos.
     El mensaje se firma con `businessName` de los ajustes de la sucursal.
-  - Pendiente de la fase: envío de ticket/comprobante por correo, que usa la identidad de
-    sucursal (`EmailMessage.fromBusiness`), ya en uso por el correo de activación.
+  - ✅ **Comprobante por correo**: `POST /api/sales/{id}/send-receipt`, `SaleReceiptMailer` y
+    plantilla con los renglones, descuento, total, pagado y saldo. **A petición, no automático**:
+    mandar un correo a alguien porque compró, sin que lo pidiera, es correo no solicitado; que lo
+    pida en el mostrador es el consentimiento. Si el cliente no tenía correo, se guarda el que se
+    capture — la base de correos crece con el uso normal. Va con la identidad de la óptica y **sin
+    mencionar la marca**: el cliente le compró a su óptica, no a la plataforma. El pie aclara que
+    no tiene validez fiscal, para que nadie lo confunda con un CFDI (Fase 5).
 
 #### Decisiones de la Fase 4 que conviene recordar
 - **No se puede enviar "desde" el correo del cliente.** Poner su Gmail en el campo `De:` hace que

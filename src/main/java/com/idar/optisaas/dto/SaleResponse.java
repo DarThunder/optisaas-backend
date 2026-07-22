@@ -13,6 +13,7 @@ public class SaleResponse {
     
     private String clientName;
     private String clientPhone;
+    private String clientEmail;
 
     private BigDecimal totalAmount;
     private BigDecimal paidAmount;

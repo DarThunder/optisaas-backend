@@ -128,6 +128,23 @@ public class SaleController {
     }
     // -------------------------------------------------
 
+    /**
+     * Envía el comprobante de la venta por correo, a petición de quien atiende.
+     * Si el cuerpo trae `email` se usa ese; si no, el que tenga registrado el cliente.
+     */
+    @PostMapping("/{id}/send-receipt")
+    public ResponseEntity<?> sendReceipt(@PathVariable Long id, @RequestBody(required = false) Map<String, String> payload) {
+        try {
+            String email = payload != null ? payload.get("email") : null;
+            String sentTo = saleService.sendReceipt(id, email);
+            return ResponseEntity.ok(Map.of(
+                    "message", "Comprobante enviado a " + sentTo,
+                    "sentTo", sentTo));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
     @GetMapping("/by-client/{clientId}")
     public ResponseEntity<List<SaleResponse>> getSalesByClient(@PathVariable Long clientId) {
         // Ahora devolvemos SaleResponse, que es seguro para JSON
