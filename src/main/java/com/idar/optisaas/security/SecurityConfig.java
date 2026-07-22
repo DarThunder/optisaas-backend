@@ -28,6 +28,9 @@ public class SecurityConfig {
     @Autowired
     private HubScopeGuardFilter hubScopeGuardFilter;
 
+    @Autowired
+    private PlatformScopeGuardFilter platformScopeGuardFilter;
+
     // Orígenes permitidos para CORS. Configurable por entorno (coma-separado).
     // En producción, fijar al dominio real del frontend.
     @Value("${app.cors.allowed-origins:http://localhost:3000,http://127.0.0.1:3000}")
@@ -56,6 +59,13 @@ public class SecurityConfig {
                 // Endpoints públicos (Auth). Salud del sistema pública para health-checks;
                 // el resto de actuator queda restringido al Dueño.
                 .requestMatchers("/api/auth/**").permitAll()
+
+                // Formulario de solicitud de acceso de la página de presentación.
+                // Es la ÚNICA escritura anónima del sistema: se limita por IP, tiene topes de
+                // longitud y campo trampa (ver RegistrationRequestService). Solo POST — no hay
+                // nada público que leer, y dejar un GET abierto aquí expondría los datos de
+                // contacto de todos los prospectos.
+                .requestMatchers(HttpMethod.POST, "/api/public/registration-requests").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 .requestMatchers("/actuator/**").hasRole("OWNER")
                 
@@ -69,6 +79,12 @@ public class SecurityConfig {
                 // Permitimos a OWNER y MANAGER gestionar esta sección globalmente
                 .requestMatchers("/api/users/**").hasAnyRole("OWNER", "MANAGER")
                 .requestMatchers("/api/branches/**").hasRole("OWNER")
+
+                // Panel de plataforma: dar de alta ópticas y gestionar su suscripción.
+                // ROLE_PLATFORM no es un rol de óptica (ver User.platformAdmin): quien lo
+                // tiene no pertenece a ninguna sucursal, así que aunque llamara a cualquier
+                // otro endpoint de esta lista no encontraría datos que devolverle.
+                .requestMatchers("/api/platform/**").hasRole("PLATFORM")
 
                 // Bitácora de auditoría: solo el Dueño (el servicio la acota a SUS sucursales).
                 .requestMatchers("/api/audit/**").hasRole("OWNER")
@@ -129,6 +145,8 @@ public class SecurityConfig {
         // y el guardián de alcance de Hub justo después (ya hay contexto de sesión).
         http.addFilterBefore(authTokenFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterAfter(hubScopeGuardFilter, AuthTokenFilter.class);
+        // Después de AuthTokenFilter: necesita las autoridades ya resueltas en el contexto.
+        http.addFilterAfter(platformScopeGuardFilter, AuthTokenFilter.class);
 
         return http.build();
     }

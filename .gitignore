@@ -36,3 +36,5 @@ build/
 postgres-data/
 .env
 backups/
+# Logs de Caddy (se generan en el servidor, no son del proyecto).
+logs/

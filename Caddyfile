@@ -1,0 +1,79 @@
+# Reverse proxy y TLS de Fóvea.
+#
+# Un solo origen para todo: Caddy sirve el frontend (estático, construido por el servicio
+# frontend-build) y hace proxy de /api al backend. El frontend llama al backend con rutas
+# relativas ('/api/...'), así que compartir origen no es una preferencia: es un requisito.
+# A cambio, CORS deja de importar, las cookies viajan como de mismo sitio (SameSite=Lax
+# basta, no hace falta None) y solo hay un certificado que renovar.
+#
+# Variables (del .env, vía docker compose):
+#   DOMAIN      dominio público. Ej: fovea.com.mx
+#               Para pruebas locales sin TLS: :80
+#   ACME_EMAIL  correo de aviso de Let's Encrypt (caducidad, problemas de renovación).
+
+{
+	email {$ACME_EMAIL}
+	# Caddy pide y renueva el certificado solo. No hay cron ni certbot que mantener.
+}
+
+{$DOMAIN} {
+	encode gzip zstd
+
+	# --- API: todo lo que empiece por /api va al backend ---
+	# Nada más se proxea. /actuator NO es accesible desde fuera: la salud de la app es
+	# asunto interno, y exponerla regala información de la infraestructura. Los propios
+	# healthcheck de Docker la consultan por la red interna, no por aquí.
+	handle /api/* {
+		reverse_proxy app:8080 {
+			# El backend usa X-Forwarded-For para la IP de la bitácora de auditoría y la
+			# confía sin validar. Caddy la fija a partir de la conexión real, así que la
+			# de un cliente que intente falsificarla queda sobrescrita — siempre que a la
+			# app NO se llegue por otro camino. Por eso el 8080 no se publica en prod.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# --- Frontend estático ---
+	handle {
+		root * /srv
+
+		# Los assets llevan hash en el nombre (Vite): si el contenido cambia, cambia el
+		# nombre. Por eso pueden cachearse para siempre sin miedo.
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+		# index.html NUNCA se cachea. Es el archivo que decide qué bundle carga el
+		# navegador: si se queda pegado, el POS sigue ejecutando código viejo aunque
+		# despliegues. Esto es lo que hace seguro volver Idempotency-Key obligatorio —
+		# sin ello, una caja con el bundle anterior recibiría 400 en cada venta.
+		@html path /index.html /
+		header @html Cache-Control "no-store, must-revalidate"
+
+		# SPA: las rutas del cliente no existen como archivo, las resuelve React.
+		try_files {path} /index.html
+		file_server
+	}
+
+	# --- Cabeceras de seguridad ---
+	header {
+		# HTTPS obligatorio durante un año. Ojo: una vez que un navegador lo recibe, no
+		# vuelve a aceptar http en este dominio hasta que caduque. No lo actives sobre un
+		# dominio donde aún necesites servir HTTP.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# Nada de adivinar tipos: un .txt subido no se ejecuta como script.
+		X-Content-Type-Options "nosniff"
+		# Sin iframes ajenos: evita clickjacking sobre el punto de venta.
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# El servidor no anuncia qué es ni su versión.
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

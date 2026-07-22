@@ -47,7 +47,13 @@ public class AuthTokenFilter extends OncePerRequestFilter {
                     User user = userOp.get();
                     List<SimpleGrantedAuthority> authorities = new ArrayList<>();
 
-                    if (jwtUtils.isFullToken(jwt)) {
+                    if (user.isPlatformAdmin()) {
+                        // El administrador de plataforma no pertenece a ninguna óptica: no hay
+                        // sucursal que seleccionar ni TenantContext que fijar (queda nulo a
+                        // propósito). Se resuelve antes que todo lo demás porque la lógica de
+                        // abajo asume pertenencia a una sucursal, que aquí nunca existe.
+                        authorities.add(new SimpleGrantedAuthority("ROLE_PLATFORM"));
+                    } else if (jwtUtils.isFullToken(jwt)) {
                     Long branchId = jwtUtils.getBranchIdFromToken(jwt);
                     TenantContext.setCurrentBranch(branchId);
 

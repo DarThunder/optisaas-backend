@@ -1,16 +1,63 @@
 # Override de producción.
-# Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
-# Notas de despliegue de prod:
-#  - La base de datos NO debe exponer su puerto al exterior. En este override se elimina
-#    el mapeo de puerto de postgres-db (queda accesible solo dentro de la red de Compose).
-#  - Coloca la app detrás de un reverse proxy con HTTPS (Nginx/Caddy/Traefik) y pon
-#    COOKIE_SECURE=true, DDL_AUTO=validate, SEED_ENABLED=false en el .env de prod.
+# Requiere que los dos repos estén clonados uno al lado del otro:
+#   /srv/fovea/optisaas-backend    <- desde aquí se ejecuta compose
+#   /srv/fovea/optisaas-frontend   <- lo construye el servicio frontend-build
+#
+# En el .env de prod: COOKIE_SECURE=true, DDL_AUTO=validate, SEED_ENABLED=false,
+# MAIL_PROVIDER=smtp, y DOMAIN / ACME_EMAIL para Caddy. Ver docs/deploy.md.
 services:
   app:
     restart: always
+    # Sin mapeo de puertos: a la app solo se llega por Caddy, a través de la red de
+    # Compose. Publicar el 8080 dejaría una puerta que salta TLS, las cookies Secure y
+    # —más grave— permitiría falsificar el X-Forwarded-For que la bitácora de auditoría
+    # registra como IP del responsable de cada acción sensible.
+    ports: !reset []
 
   postgres-db:
     restart: always
     # Sin mapeo de puertos: la DB no es accesible desde el host/red, solo desde la app.
     ports: !reset []
+
+  # Construye el frontend y publica el resultado en el volumen que sirve Caddy.
+  # No es un servicio que quede corriendo: copia y termina (por eso restart: "no").
+  frontend-build:
+    build:
+      context: ../optisaas-frontend
+    restart: "no"
+    volumes:
+      - frontend-dist:/out
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?Define DOMAIN en el .env (ej. fovea.com.mx)}
+      ACME_EMAIL: ${ACME_EMAIL:?Define ACME_EMAIL en el .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - frontend-dist:/srv:ro
+      # Persisten los certificados. Sin esto, cada recreación del contenedor volvería a
+      # pedirlos a Let's Encrypt, que limita a 5 por semana y por dominio: en un par de
+      # despliegues te quedas sin poder emitir y el sitio sin HTTPS.
+      - caddy-data:/data
+      - caddy-config:/config
+      - ./logs/caddy:/var/log/caddy
+    depends_on:
+      app:
+        condition: service_started
+      # Caddy no arranca hasta que el frontend terminó de construirse: si no, serviría
+      # un directorio vacío y el primer visitante vería un 404.
+      frontend-build:
+        condition: service_completed_successfully
+
+volumes:
+  frontend-dist:
+  caddy-data:
+  caddy-config:

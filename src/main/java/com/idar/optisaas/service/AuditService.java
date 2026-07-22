@@ -6,7 +6,7 @@ import com.idar.optisaas.repository.AuditLogRepository;
 import com.idar.optisaas.repository.UserRepository;
 import com.idar.optisaas.security.TenantContext;
 import com.idar.optisaas.util.AuditAction;
-import jakarta.servlet.http.HttpServletRequest;
+import com.idar.optisaas.util.ClientIp;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -85,13 +85,7 @@ public class AuditService {
         try {
             var attrs = RequestContextHolder.getRequestAttributes();
             if (!(attrs instanceof ServletRequestAttributes servletAttrs)) return null;
-            HttpServletRequest request = servletAttrs.getRequest();
-            String forwarded = request.getHeader("X-Forwarded-For");
-            if (forwarded != null && !forwarded.isBlank()) {
-                // Puede venir como "cliente, proxy1, proxy2": nos quedamos con el primero.
-                return forwarded.split(",")[0].trim();
-            }
-            return request.getRemoteAddr();
+            return ClientIp.from(servletAttrs.getRequest());
         } catch (Exception e) {
             return null;
         }

@@ -260,6 +260,66 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
   donde la app ya no vive. Los enlaces usan `app.frontend.publicUrl` (`FRONTEND_PUBLIC_URL`).
   Se detectó ejecutando el flujo, no leyendo el código; hay test de regresión.
 
+- **Alta de ópticas (Fase A del panel de plataforma):** ✅ hecha. Antecede a la Fase 6 y no la
+  incluye: **no hay pasarela de pago ni la habrá hasta que cobrar a mano sea el cuello de
+  botella.** Con un cliente, cobrar es una transferencia; automatizarlo sería construir una
+  máquina para levantar tres monedas. El prepago semestral o anual alarga esa pista años.
+  - ✅ **El administrador de plataforma es un CAMPO (`users.platform_admin`), no un rol.** Los
+    roles viven en `user_branch_roles`, o sea siempre dentro de una óptica, y las autoridades
+    de Spring salen de ahí (`AuthTokenFilter`). Se le crea con CERO vínculos: como todas las
+    consultas se acotan a las sucursales del usuario, no hay nada que devolverle. El
+    aislamiento es estructural, no una lista de chequeos que alguien deba recordar.
+  - ✅ `TenantService.createOptica` da de alta la óptica completa en una transacción: sucursal,
+    `BranchSettings` (de ahí salen el ticket, el WhatsApp y la identidad del correo), dueño sin
+    contraseña con código de activación, vínculo OWNER y suscripción. `BranchService.createBranch`
+    NO se tocó: ese sirve para que un dueño existente abra otra sucursal, que es otra operación.
+  - ✅ **Arranque en frío** (`PlatformAdminBootstrap`): con `SEED_ENABLED=false` la base nace sin
+    ningún usuario. Crea la cuenta desde variables de entorno si no existe, sin contraseña —
+    emite un código que sale por el log. Idempotente. Sin esto no se puede entrar a producción.
+  - ✅ `PlatformScopeGuardFilter`: la cuenta de plataforma solo alcanza `/api/platform`,
+    `/api/auth` y la salud.
+  - ✅ **Solicitudes de acceso (Fase B)**: `RegistrationRequest` (migración `V9`), formulario
+    público `POST /api/public/registration-requests` y bandeja en el panel. Aprobar y dar de
+    alta la óptica son la MISMA operación: delega en `createOptica` y enlaza la solicitud con
+    el dueño creado (`created_owner_id`), así queda el rastro de qué solicitud fue qué cliente.
+    Rechazar no borra. Tests: 135 en verde.
+
+#### Decisiones de esta fase que conviene recordar
+- **`user_branch_roles.role` tiene un CHECK en la base** que fija los cuatro roles. Agregar un
+  quinto valor al enum de Java compila y arranca sin protestar, y Postgres rechaza cada
+  inserción en tiempo de ejecución. El diseño elegido no lo toca; si algún día hace falta un
+  rol nuevo, va con migración. `audit_log.action` es `varchar(50)` sin CHECK: ahí sí se pueden
+  agregar acciones libremente.
+- **La lista del guardián es de PERMITIDOS, no de prohibidos**, al revés que `HubScopeGuardFilter`.
+  Con una lista de prohibidos, cada endpoint nuevo nace alcanzable para la cuenta que está por
+  encima de todos los clientes. Se midió antes de escribirlo: sin el filtro, la cuenta de
+  plataforma recibía 200 en `/api/products` y `/api/sales` (cuerpo vacío, porque las consultas
+  sí se acotan) y un 500 en `/api/clinical-records`. Llegaba vacío por suerte del diseño, no
+  por decisión — y eso es estar a un bug de distancia de una fuga.
+- **Registro público NO**, y no por pereza: sin cobro ni límites, cualquiera crearía inquilinos
+  en el VPS, y expondría el aislamiento entre inquilinos a internet antes de haberlo probado con
+  dos clientes reales. La puerta pública es una página de presentación que pide acceso; las
+  cuentas las crea el administrador. Login público sí, registro público no.
+- **Una suscripción sin `valid_until` no vence**, a propósito: es el caso del cliente en
+  acompañamiento (Mogar afinando el sistema sin plazo).
+- **Al cortar por falta de pago: solo lectura, nunca cerrarles sus datos.** Esto es un punto de
+  venta; dejar a una óptica sin poder cobrar es dejarla sin operar. Queda pendiente de
+  implementar — con pocos clientes la herramienta real es llamarles.
+- **El formulario público es la ÚNICA escritura anónima del sistema.** Va con límite por IP
+  (5 cada 15 min, reusando `AttemptLimiter` como contador de eventos), topes de longitud en
+  todos los campos, campo trampa anti-bot y deduplicación por correo. Y responde **siempre lo
+  mismo** —bloqueado, duplicado o aceptado— por la misma razón que `forgot-password`: si
+  variara, serviría para averiguar quiénes son clientes o para tantear el límite. Solo acepta
+  POST: un GET abierto ahí expondría los datos de contacto de todos los prospectos.
+  Ojo: el limitador es en memoria y por instancia, así que se reinicia con cada despliegue
+  (ver Fase 7, Redis).
+- **Del consentimiento se guarda la FECHA, no un booleano.** Se recogen datos personales; el día
+  que haya que demostrar que alguien aceptó, un `true` no dice nada y una marca de tiempo sí.
+  Falta el aviso de privacidad al que enlazar — sigue siendo pendiente legal, no técnico.
+- **`ClientIp` centraliza la lectura de `X-Forwarded-For`** (bitácora y limitador). Confía en la
+  cabecera, lo cual es correcto SOLO porque a la app no se llega más que por Caddy. Si algún día
+  se publica el 8080, se puede falsificar tanto la IP de la bitácora como el límite del formulario.
+
 - Fases 5–7: pendientes.
 
 ### Frontend de la Fase 2 — ✅ hecho

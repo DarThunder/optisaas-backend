@@ -27,6 +27,14 @@ public enum AuditAction {
     OPERATOR_SWITCHED,
     HUB_ACCESS_GRANTED,
 
+    // --- Plataforma (alta y gestión de ópticas cliente) ---
+    // Se registran con branch_id de la óptica creada, para que quede rastro de quién la dio
+    // de alta y cuándo. El actor es el administrador de plataforma, no un usuario de la óptica.
+    TENANT_CREATED,
+    SUBSCRIPTION_UPDATED,
+    REGISTRATION_APPROVED,
+    REGISTRATION_REJECTED,
+
     // --- Gestión de empleados ---
     EMPLOYEE_CREATED,
     EMPLOYEE_UPDATED,

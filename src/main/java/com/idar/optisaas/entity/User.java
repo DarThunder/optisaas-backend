@@ -50,6 +50,16 @@ public class User {
     @JsonIgnore
     private java.time.LocalDateTime activationCodeExpiresAt;
 
+    // --- ADMINISTRADOR DE PLATAFORMA ---
+    // Es una propiedad de la CUENTA, no un rol dentro de una óptica: los roles viven en
+    // user_branch_roles y siempre pertenecen a una sucursal. Un administrador de plataforma
+    // se crea con CERO filas en user_branch_roles, así que todas las consultas del sistema
+    // —que se acotan a las sucursales del usuario— le devuelven vacío. No puede ver ventas,
+    // clientes ni expedientes de ninguna óptica, y eso no depende de recordar un chequeo en
+    // cada endpoint nuevo: es consecuencia de no pertenecer a ningún lado.
+    @Column(name = "platform_admin", nullable = false)
+    private boolean platformAdmin = false;
+
     @OneToMany(mappedBy = "user", fetch = FetchType.EAGER, cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<UserBranchRole> branchRoles;
 
