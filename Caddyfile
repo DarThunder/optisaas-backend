@@ -1,34 +1,97 @@
 # Reverse proxy y TLS de Fóvea.
 #
-# Un solo origen para todo: Caddy sirve el frontend (estático, construido por el servicio
-# frontend-build) y hace proxy de /api al backend. El frontend llama al backend con rutas
-# relativas ('/api/...'), así que compartir origen no es una preferencia: es un requisito.
-# A cambio, CORS deja de importar, las cookies viajan como de mismo sitio (SameSite=Lax
-# basta, no hace falta None) y solo hay un certificado que renovar.
+# DOS SITIOS, dos dominios:
+#
+#   fovea.com.mx       → página de presentación (estática) + el formulario de solicitud
+#   app.fovea.com.mx   → el sistema (frontend + API)
+#
+# Por qué separados: el sistema es una SPA que resuelve sus propias rutas, así que sirve el
+# index.html para cualquier ruta desconocida. Si ambos vivieran en el mismo dominio, la
+# presentación quedaría tapada por ese comodín. Además conviene que la página pública no
+# comparta origen con la aplicación que guarda expedientes de pacientes.
+#
+# El sistema sigue siendo de UN SOLO ORIGEN puertas adentro: en app.fovea.com.mx conviven el
+# frontend y /api, que es lo que el frontend necesita (llama con rutas relativas) y lo que
+# hace que CORS no importe y basten cookies SameSite=Lax.
 #
 # Variables (del .env, vía docker compose):
-#   DOMAIN      dominio público. Ej: fovea.com.mx
-#               Para pruebas locales sin TLS: :80
-#   ACME_EMAIL  correo de aviso de Let's Encrypt (caducidad, problemas de renovación).
+#   DOMAIN      dominio de la presentación.  Ej: fovea.com.mx
+#   APP_DOMAIN  dominio del sistema.         Ej: app.fovea.com.mx
+#   ACME_EMAIL  correo de aviso de Let's Encrypt (caducidad, fallos de renovación).
+#
+# Para pruebas locales sin TLS: DOMAIN=:80 y APP_DOMAIN=:8080 (o los que uses).
 
 {
 	email {$ACME_EMAIL}
-	# Caddy pide y renueva el certificado solo. No hay cron ni certbot que mantener.
+	# Caddy pide y renueva los certificados solo. No hay cron ni certbot que mantener.
 }
 
+# =============================================================================
+# Página de presentación
+# =============================================================================
 {$DOMAIN} {
 	encode gzip zstd
 
+	# El formulario de solicitud pasa a la aplicación desde ESTE mismo dominio. Así el
+	# navegador no lo trata como petición entre orígenes y no hay que abrir CORS para nada.
+	#
+	# Solo esta ruta y solo POST. Es la única superficie de la API que existe sin sesión;
+	# dejar pasar más desde aquí sería regalar alcance a un dominio que no lo necesita.
+	@solicitudes {
+		path /api/public/registration-requests
+		method POST
+	}
+	handle @solicitudes {
+		reverse_proxy app:8080 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	handle {
+		root * /srv/landing
+		# Sin try_files hacia un index: aquí no hay SPA. Una ruta que no existe debe dar 404,
+		# no devolver la portada con otra dirección en la barra.
+		file_server
+	}
+
+	handle_errors {
+		respond "No encontramos esa página. Ve a https://{$DOMAIN}" {http.error.status_code}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/landing.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
+
+# =============================================================================
+# El sistema
+# =============================================================================
+{$APP_DOMAIN} {
+	encode gzip zstd
+
 	# --- API: todo lo que empiece por /api va al backend ---
-	# Nada más se proxea. /actuator NO es accesible desde fuera: la salud de la app es
-	# asunto interno, y exponerla regala información de la infraestructura. Los propios
-	# healthcheck de Docker la consultan por la red interna, no por aquí.
+	# Nada más se proxea. /actuator NO es accesible desde fuera: la salud de la app es asunto
+	# interno, y exponerla regala información de la infraestructura. Los healthcheck de Docker
+	# la consultan por la red interna, no por aquí.
 	handle /api/* {
 		reverse_proxy app:8080 {
-			# El backend usa X-Forwarded-For para la IP de la bitácora de auditoría y la
-			# confía sin validar. Caddy la fija a partir de la conexión real, así que la
-			# de un cliente que intente falsificarla queda sobrescrita — siempre que a la
-			# app NO se llegue por otro camino. Por eso el 8080 no se publica en prod.
+			# El backend usa X-Forwarded-For para la IP de la bitácora de auditoría y para el
+			# límite del formulario público, y la confía sin validar. Caddy la fija a partir de
+			# la conexión real, así que la de un cliente que intente falsificarla queda
+			# sobrescrita — siempre que a la app NO se llegue por otro camino. Por eso el 8080
+			# no se publica en producción.
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Real-IP {remote_host}
 		}
@@ -36,17 +99,17 @@
 
 	# --- Frontend estático ---
 	handle {
-		root * /srv
+		root * /srv/app
 
-		# Los assets llevan hash en el nombre (Vite): si el contenido cambia, cambia el
-		# nombre. Por eso pueden cachearse para siempre sin miedo.
+		# Los assets llevan hash en el nombre (Vite): si el contenido cambia, cambia el nombre.
+		# Por eso pueden cachearse para siempre sin miedo.
 		@hashed path /assets/*
 		header @hashed Cache-Control "public, max-age=31536000, immutable"
 
-		# index.html NUNCA se cachea. Es el archivo que decide qué bundle carga el
-		# navegador: si se queda pegado, el POS sigue ejecutando código viejo aunque
-		# despliegues. Esto es lo que hace seguro volver Idempotency-Key obligatorio —
-		# sin ello, una caja con el bundle anterior recibiría 400 en cada venta.
+		# index.html NUNCA se cachea. Es el archivo que decide qué bundle carga el navegador:
+		# si se queda pegado, el POS sigue ejecutando código viejo aunque despliegues. Esto es
+		# lo que hace seguro volver Idempotency-Key obligatorio — sin ello, una caja con el
+		# bundle anterior recibiría 400 en cada venta.
 		@html path /index.html /
 		header @html Cache-Control "no-store, must-revalidate"
 
@@ -55,23 +118,16 @@
 		file_server
 	}
 
-	# --- Cabeceras de seguridad ---
 	header {
-		# HTTPS obligatorio durante un año. Ojo: una vez que un navegador lo recibe, no
-		# vuelve a aceptar http en este dominio hasta que caduque. No lo actives sobre un
-		# dominio donde aún necesites servir HTTP.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		# Nada de adivinar tipos: un .txt subido no se ejecuta como script.
 		X-Content-Type-Options "nosniff"
-		# Sin iframes ajenos: evita clickjacking sobre el punto de venta.
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		# El servidor no anuncia qué es ni su versión.
 		-Server
 	}
 
 	log {
-		output file /var/log/caddy/access.log {
+		output file /var/log/caddy/app.log {
 			roll_size 10MiB
 			roll_keep 5
 		}

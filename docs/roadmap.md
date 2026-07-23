@@ -283,6 +283,14 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
     alta la óptica son la MISMA operación: delega en `createOptica` y enlaza la solicitud con
     el dueño creado (`created_owner_id`), así queda el rastro de qué solicitud fue qué cliente.
     Rechazar no borra. Tests: 135 en verde.
+  - ✅ **Página de presentación (Fase C)**: `optisaas-frontend/landing/`, HTML estático sin
+    backend que Caddy sirve directo (bind mount). Vive en el repo del frontend, no en el
+    backend, para que editar el texto de marketing no dispare el CI de Maven ni acople contenido
+    con despliegue. Dos dominios: `fovea.com.mx` (presentación) y
+    `app.fovea.com.mx` (el sistema). Del dominio público **solo** pasa
+    `POST /api/public/registration-requests` — verificado que login, panel, datos de ópticas y
+    `/actuator` dan 404 desde ahí. El aviso de privacidad queda como **borrador con `noindex`**:
+    es un documento legal, no lo redacta quien escribe el código.
 
 #### Decisiones de esta fase que conviene recordar
 - **`user_branch_roles.role` tiene un CHECK en la base** que fija los cuatro roles. Agregar un
@@ -319,6 +327,19 @@ Fases 5 y 6 requieren decisiones/credenciales externas del cliente.
 - **`ClientIp` centraliza la lectura de `X-Forwarded-For`** (bitácora y limitador). Confía en la
   cabecera, lo cual es correcto SOLO porque a la app no se llega más que por Caddy. Si algún día
   se publica el 8080, se puede falsificar tanto la IP de la bitácora como el límite del formulario.
+  Verificado end-to-end: enviando `X-Forwarded-For: 1.2.3.4` a mano, Caddy la sobrescribe y se
+  registra la IP real.
+- **Dos dominios, no uno.** La aplicación es una SPA y sirve su `index.html` para cualquier ruta
+  desconocida: en el mismo dominio se tragaría la portada. Consecuencias que no son obvias:
+  `FRONTEND_PUBLIC_URL` es el dominio del SISTEMA (los enlaces de los correos llevan a entrar,
+  no al folleto), y hacen falta DOS registros DNS antes de levantar, porque Caddy pide un
+  certificado por cada nombre.
+- **`docker-compose.yml` enumera una a una las variables que pasa al contenedor.** Una variable
+  puesta en el `.env` que no esté en esa lista NO llega, y falla en silencio. Pasó con
+  `PLATFORM_ADMIN_USERNAME`: la Fase A se verificó ejecutando el jar directo con variables de
+  entorno, saltándose Docker justo por donde fallaba. En producción habría dado una base sin
+  usuarios y sin forma de entrar. Al agregar cualquier configuración nueva, hay que tocar los
+  dos archivos — y verificarla **dentro de Docker**, no con el jar suelto.
 
 - Fases 5–7: pendientes.
 

@@ -4,29 +4,50 @@ Guía para poner el sistema en un VPS con HTTPS. Asume Docker y Docker Compose i
 
 ## Cómo encaja todo
 
-Un solo **Caddy** atiende el puerto 443 y reparte: lo que empieza por `/api` va al backend,
-todo lo demás es el frontend estático. No es una preferencia estética — el frontend llama al
-backend con rutas relativas (`fetch('/api/...')`), así que **ambos tienen que responder en el
-mismo origen**. A cambio se gana bastante: CORS deja de ser un problema, las cookies viajan
-como de mismo sitio (`SameSite=Lax` basta) y solo hay un certificado que renovar.
+Un solo **Caddy** atiende el 443 y sirve **dos dominios**:
 
 ```
-Internet ──443──> Caddy ──┬── /api/*  ──> app:8080      (red interna, sin puerto público)
-                          └── resto    ──> /srv (build del frontend)
-                                            app ──> postgres-db:5432  (sin puerto público)
+fovea.com.mx      → página de presentación (estática)
+                    + POST /api/public/registration-requests, y nada más
+
+app.fovea.com.mx  → el sistema: frontend + /api/*
+```
+
+Van separados porque la aplicación es una SPA y sirve su `index.html` para cualquier ruta que
+no reconozca: en el mismo dominio taparía a la portada. Y de paso, la página pública no
+comparte nada con la aplicación que guarda expedientes de pacientes.
+
+Puertas adentro el sistema **sigue siendo de un solo origen**: en `app.fovea.com.mx` conviven
+el frontend y `/api`. Eso no es estética — el frontend llama con rutas relativas
+(`fetch('/api/...')`), así que necesita compartir origen. A cambio, CORS deja de importar y
+bastan cookies `SameSite=Lax`. El formulario de la presentación tampoco cruza origen, porque
+Caddy lo hace pasar desde su propio dominio.
+
+```
+Internet ──443──> Caddy ──┬── fovea.com.mx     ──> /srv/landing (estático)
+                          │     └── POST /api/public/registration-requests ──> app:8080
+                          └── app.fovea.com.mx ┬── /api/*  ──> app:8080
+                                               └── resto   ──> /srv/app (build del frontend)
+                                                     app ──> postgres-db:5432
 ```
 
 Ni la app ni la base publican puertos. A la app solo se llega por Caddy: además de evitar que
 se salte el TLS, impide falsificar la cabecera `X-Forwarded-For`, que la bitácora de auditoría
-registra como la IP responsable de cada acción sensible.
+registra como la IP responsable de cada acción sensible y que limita el formulario público.
+Verificado: enviando `X-Forwarded-For: 1.2.3.4` a mano, Caddy la sobrescribe con la IP real.
 
 ## Requisitos previos
 
 1. **VPS** con Docker (~100–120 MXN/mes en Hetzner o DigitalOcean bastan de sobra).
-2. **Dominio con el DNS ya apuntando a la IP del servidor.** No es opcional ni se puede dejar
-   para después: Let's Encrypt valida el dominio conectándose en vivo, así que si el DNS no
-   resuelve todavía, Caddy no consigue certificado y el sitio no levanta con HTTPS.
-   Comprueba antes: `dig +short fovea.com.mx` debe devolver la IP del VPS.
+2. **Los DOS dominios con el DNS ya apuntando a la IP del servidor**, tanto el de la
+   presentación como el del sistema (un registro A para cada uno, a la misma IP). No es
+   opcional ni se puede dejar para después: Let's Encrypt valida conectándose en vivo, así que
+   si el DNS no resuelve todavía, Caddy no consigue certificado y el sitio no levanta con
+   HTTPS. Comprueba antes que ambos devuelvan la IP del VPS:
+
+   ```bash
+   dig +short fovea.com.mx && dig +short app.fovea.com.mx
+   ```
 3. **Los dos repos clonados uno al lado del otro**, porque compose construye el frontend
    desde `../optisaas-frontend`:
 
@@ -56,12 +77,16 @@ COOKIE_SECURE=true
 SEED_ENABLED=false
 DDL_AUTO=validate
 DOMAIN=fovea.com.mx
+APP_DOMAIN=app.fovea.com.mx
 ACME_EMAIL=un-correo-que-leas@ejemplo.com
-APP_CORS_ALLOWED_ORIGINS=https://fovea.com.mx
-FRONTEND_PUBLIC_URL=https://fovea.com.mx
+APP_CORS_ALLOWED_ORIGINS=https://app.fovea.com.mx
+FRONTEND_PUBLIC_URL=https://app.fovea.com.mx
 MAIL_PROVIDER=smtp
 PLATFORM_ADMIN_USERNAME=tu-usuario
 ```
+
+> **`FRONTEND_PUBLIC_URL` es el dominio del SISTEMA, no el de la presentación.** De ahí salen
+> los enlaces de los correos: quien recupera su contraseña va a entrar, no a leer el folleto.
 
 > **`PLATFORM_ADMIN_USERNAME` no es opcional en producción.** Con `SEED_ENABLED=false` la base
 > arranca sin ningún usuario: sin esta cuenta no hay forma de entrar a dar de alta la primera
@@ -129,6 +154,30 @@ del dueño para dictárselo o dejar que le llegue por correo.
 > Esa cuenta administra el servicio, **no opera ópticas**: no pertenece a ninguna sucursal y un
 > filtro le rechaza cualquier ruta fuera de su panel. Poder dar de alta a un cliente no implica
 > poder mirar dentro de su negocio — lo cual importa, porque ahí hay datos de salud.
+
+## Antes de publicar la página de presentación
+
+La presentación vive en el repo del frontend, en `optisaas-frontend/landing/`: es HTML estático
+que Caddy sirve directo (bind mount), sin build ni imagen. Cambiar un texto es editar el archivo
+y recargar. Está ahí y no en el backend para que corregir un texto no dispare el CI de Maven.
+
+Quedan tres cosas marcadas `[PENDIENTE]` dentro de `optisaas-frontend/landing/index.html`:
+
+1. **Tu número de WhatsApp**, con lada de país y sin `+` (para México: `52` + 10 dígitos).
+2. **Capturas de pantalla reales.** Tapa nombres y datos de pacientes antes de publicarlas:
+   son datos personales, y las graduaciones además son datos de salud.
+3. **El aviso de privacidad** (`optisaas-frontend/landing/aviso-privacidad.html`) es **un borrador y no debe
+   publicarse así**. Es un esqueleto con las secciones que exige la LFPDPPP para que la
+   conversación con quien sepa de esto sea corta, no un documento válido. Lleva `noindex` y un
+   recuadro de advertencia; quítalos solo cuando esté revisado.
+
+> El formulario ya recoge datos personales en cuanto la página esté en línea. El aviso no es
+> un trámite posterior: es lo que hace legítimo guardarlos.
+
+Un detalle de mantenimiento: en el resto del proyecto el nombre de la marca sale de
+`app.brand.name` y `brand.js`, y hay tests que impiden escribirlo a mano. La presentación es
+HTML sin backend que lo inyecte, así que es **el único lugar donde "Fóvea" está escrito a
+mano**. Si algún día cambia el nombre, acuérdate de este archivo.
 
 ## Respaldos
 

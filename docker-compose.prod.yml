@@ -39,10 +39,16 @@ services:
       - "443:443/udp"   # HTTP/3
     environment:
       DOMAIN: ${DOMAIN:?Define DOMAIN en el .env (ej. fovea.com.mx)}
+      APP_DOMAIN: ${APP_DOMAIN:?Define APP_DOMAIN en el .env (ej. app.fovea.com.mx)}
       ACME_EMAIL: ${ACME_EMAIL:?Define ACME_EMAIL en el .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - frontend-dist:/srv:ro
+      - frontend-dist:/srv/app:ro
+      # La presentación es HTML estático sin compilar: se monta directo del repo del FRONTEND
+      # (vive con lo demás que ve el usuario), sin imagen ni build. Cambiar un texto es editar
+      # el archivo y recargar Caddy. La ruta asume los dos repos clonados lado a lado, que es
+      # lo que el servicio frontend-build ya requiere.
+      - ../optisaas-frontend/landing:/srv/landing:ro
       # Persisten los certificados. Sin esto, cada recreación del contenedor volvería a
       # pedirlos a Let's Encrypt, que limita a 5 por semana y por dominio: en un par de
       # despliegues te quedas sin poder emitir y el sitio sin HTTPS.

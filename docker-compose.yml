@@ -16,6 +16,12 @@ services:
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       # URL para los enlaces dentro de los correos (distinta de la lista de CORS de arriba).
       FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:3000}
+      # Cuenta de plataforma: sin esto, una base con SEED_ENABLED=false arranca sin NINGÚN
+      # usuario y no hay forma de entrar. Esta lista es explícita, así que una variable que
+      # esté en el .env pero no aquí simplemente no llega al contenedor y falla en silencio.
+      PLATFORM_ADMIN_USERNAME: ${PLATFORM_ADMIN_USERNAME:-}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
+      PLATFORM_ADMIN_NAME: ${PLATFORM_ADMIN_NAME:-Administrador de plataforma}
       BRAND_NAME: ${BRAND_NAME:-Fóvea}
       BRAND_MAKER: ${BRAND_MAKER:-VLK}
       MAIL_PROVIDER: ${MAIL_PROVIDER:-log}
